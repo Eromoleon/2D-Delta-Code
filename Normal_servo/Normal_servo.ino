@@ -35,11 +35,13 @@ struct ServoAngles{
 	double  theta2;
 };
 
-Point * intersection(Circle c1, Circle c2);
-ServoAngles inverse(Point p, bool &outOfRange);
+
 
 //
 // Function headers:
+
+Point * intersection(Circle c1, Circle c2);
+ServoAngles inverse(Point p, bool &outOfRange);
 
 void buttonPressed();
 bool turnServo(int servoNum, int duration);

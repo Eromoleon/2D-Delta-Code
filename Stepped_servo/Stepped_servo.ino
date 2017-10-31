@@ -40,13 +40,13 @@ void SteppedServo::write(int pos){
 	its_servo.write(pos);
 }
 
-void SteppedServo::step(int direction){  //+-1
+void SteppedServo::step(int steps){  
 	int currentPos = its_servo.read();
-	int newPos = currentPos+direction;
-	if (newPos>174){
+	int newPos = currentPos+steps;
+	if (newPos>174){ // limit 
 		newPos = 174;
 	}
-	if (newPos<6){
+	if (newPos<6){ // limit
 		newPos = 6;
 	}
 	its_servo.write(newPos);

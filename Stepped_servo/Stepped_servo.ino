@@ -19,7 +19,7 @@ class SteppedServo // Instead of Servo::write(angle) we can now use SteppedServo
 		int read();
 		void write(int pos);
 		void init(Servo & sr);
-		void step(int direction); // time: time between steps in milliseconds.
+		void step(int direction); 
 	private:
 		Servo its_servo;
 };

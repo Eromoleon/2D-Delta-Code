@@ -1,6 +1,7 @@
 #include <Servo.h>
 
-
+// Arduino sketch that allows us to control a servo similarly to a stepper motor
+// Tamás Magyar 31-10-2017
 
 //
 // Constants:
@@ -10,7 +11,7 @@
 //
 // Typedefs:
 
-class SteppedServo
+class SteppedServo // Instead of Servo::write(angle) we can now use SteppedServo::step(number of steps)
 {
 	
 	public:
@@ -69,11 +70,15 @@ SteppedServo servoL;
 
 void setup(){
 	
-	sR.attach(9);
-	sR.attach(10);
+	// First we need to attach the servo objects sR, sL to pins 9, 10 in the setup
+	sR.attach(9); 
+	sL.attach(10);
+	
+	// Then we can init our steppedServos servoR and servoL with sR and SL 
 	servoR.init(sR);
 	servoL.init(sL);
 	
+	// They the original servo class methods are available
 	servoL.write(90);
 	servoR.write(90);
 	delay(1000);

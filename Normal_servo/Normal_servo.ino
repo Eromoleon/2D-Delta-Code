@@ -1,12 +1,14 @@
 #include <Servo.h>
 
+// Arduino sketch that drives a 2D delta robot to desired x, y coordinates
+// Tamás Magyar 31-10-2017
 
 //
 // Constants:
 
-const double  dist = 100;
-const double  l1 = 150;
-const double  l2 = 300;
+const double  dist = 100; // distance between the two motors
+const double  l1 = 150;  // length of the base arms (between a motor and a forearm)
+const double  l2 = 300; // length of the forearms (that connect with the endeffector)
 
 //
 // Variables:
@@ -25,6 +27,7 @@ struct Point{
 };
 
 struct Circle{
+	// center point and radius
 	double  x;
 	double  y;
 	double  r;
@@ -40,34 +43,39 @@ struct ServoAngles{
 //
 // Function headers:
 
-Point * intersection(Circle c1, Circle c2);
-ServoAngles inverse(Point p, bool &outOfRange);
+Point * intersection(Circle c1, Circle c2, bool & outOfRange); // calculates the intersection points between two circles.
+															   // if there is no intersection, outOfRange is set to true.
+ServoAngles inverse(Point p, bool &outOfRange);	// calculates base arm angles theta1 and theta2 from on the endpoint position.
+												// if it is unreachable by the robot, outOfRange is set to true.
 
 void buttonPressed();
-bool turnServo(int servoNum, int duration);
-float x, y;
-Point p;
+bool turnServo(int servoNum, int duration); //depracated
+float x, y; // for user input
+
+// for inverse kinematics:
+Point p;	
 bool outOfRange = false;
 ServoAngles angles;
-double theta1Ang;
-double theta2Ang;
-
 
 void setup(){
 	
 	servoR.attach(9);
 	servoL.attach(10);
+	
+	// go to start position (base arms horizontal):
 	servoR.write(90);
 	servoL.write(90);
 	delay(1000);
+	
+	// set Led and Button IO:
 	pinMode(LED_BUILTIN, OUTPUT);
 	pinMode(buttonPin, INPUT);
 	attachInterrupt(0,buttonPressed, HIGH); // (Interrupt number, Interrupt_Service_routine, Rising-Falling?)
-	Serial.begin(115200);
-	while(!Serial){}
+	
 	
 	// Serial communication: 
-	/*
+	Serial.begin(115200);
+	while(!Serial){}
 	Serial.println("Enter position x (min:0, max: +-150): ");
 	while (Serial.available() && Serial.read()); // empty buffer
     while (!Serial.available());                 // wait for data
@@ -79,7 +87,13 @@ void setup(){
 	y = Serial.parseFloat();  // SLOW!! Needs to be rewritten!
 	Serial.println(x);
 	Serial.println(y);
-	*/
+	// x, y is entered by the user
+	
+	
+	
+	
+	
+	//ˇˇˇˇThe rest of the setup moves the robot on a rectanglular path.ˇˇˇˇˇ
 	
 	// Inverse calculation:
 	outOfRange = false;
@@ -92,8 +106,8 @@ void setup(){
 	// Drive servos:
 	servoL.write(int(180-angles.theta1));
 	servoR.write(int(angles.theta2));
-	delay(1000); // wait for arduino to arrive at the position.
-	
+	delay(1000); // wait for the servos to arrive at the position.
+	// ^^^^^TODO: arrange this into a movej(x, y) function^^^^^^
 	
 	// Inverse calculation:
 	outOfRange = false;
@@ -106,7 +120,7 @@ void setup(){
 	// Drive servos:
 	servoL.write(int(180-angles.theta1));
 	servoR.write(int(angles.theta2));
-	delay(1000); // wait for arduino to arrive at the position.
+	delay(1000); // wait for servos to arrive at the position.
 	
 	// Inverse calculation:
 	outOfRange = false;
@@ -119,7 +133,7 @@ void setup(){
 	// Drive servos:
 	servoL.write(int(180-angles.theta1));
 	servoR.write(int(angles.theta2));
-	delay(1000); // wait for arduino to arrive at the position.
+	delay(1000); // wait for servos to arrive at the position.
 	
 	// Inverse calculation:
 	outOfRange = false;
@@ -132,7 +146,7 @@ void setup(){
 	// Drive servos:
 	servoL.write(int(180-angles.theta1));
 	servoR.write(int(angles.theta2));
-	delay(1000); // wait for arduino to arrive at the position.
+	delay(1000); // wait for servos to arrive at the position.
 	
 	
 	// Inverse calculation:
@@ -146,7 +160,7 @@ void setup(){
 	// Drive servos:
 	servoL.write(int(180-angles.theta1));
 	servoR.write(int(angles.theta2));
-	delay(3000); // wait for arduino to arrive at the position.
+	delay(3000); // wait for servos to arrive at the position.
 	
 	servoL.write(90);
 	servoR.write(90);
@@ -161,12 +175,14 @@ void loop(){
 
 //Function definitions:
 
+//Interrupt routine that stops the program on button press (not implemented yet in the new version)
 void buttonPressed(){
 	//digitalWrite(LED_BUILTIN, LOW);
 	
 	stop = true;
 }
 
+// TODO: get rid of this depracated function
 bool turnServo(Servo &servo, int duration){
 	int speed = 20; // a value between 0 and 90
 	bool done = false;
@@ -188,9 +204,9 @@ bool turnServo(Servo &servo, int duration){
 	return done;
 }
 
-Point * intersection(Circle c1, Circle c2){
-	//double  * output = (double *)malloc(4*sizeof(double ));
-	Point * outputPoints = (Point*)malloc(2*sizeof(Point));
+Point * intersection(Circle c1, Circle c2, bool & outOfRange){
+	outOfRange = false;
+	Point * outputPoints = (Point*)malloc(2*sizeof(Point)); // allocate memory for the outpoints[] array that we will return
 	double  x1 = c1.x;
 	double  y1 = c1.y;
 	double  r1 = c1.r;
@@ -215,13 +231,16 @@ Point * intersection(Circle c1, Circle c2){
 	double  xc = x1+(a/d)*(x2-x1); // Endpoint x of the orthogonal projection of P1_I1 vector to L
 	double  yc = y1+(a/d)*(y2-y1); // Endpoint y of the orthogonal projection of P1_I1 vector to L
 	// I1, I2:
-	double  xi1 = xc + (h/d)*(y2-y1);
-	double  yi1 = yc - (h/d)*(x2-x1);
+	double  xi1 = xc + (h/d)*(y2-y1);	// x coordinate of the first intersection point
+	double  yi1 = yc - (h/d)*(x2-x1);	// y coordinate of the first intersection point
 		
-	double  xi2 = xc - (h/d)*(y2-y1);
-	double  yi2 = yc + (h/d)*(x2-x1);
+	double  xi2 = xc - (h/d)*(y2-y1);	// y coordinate of the second intersection point
+	double  yi2 = yc + (h/d)*(x2-x1);	// y coordinate of the second intersection point
 	
+	//TODO: get rid of this depracated if-else statement
 	if (yi1 > yi2){
+		// fills the outpoints[] array with the calculated intersections 
+		// (we have two intersection points, outputpoints[0] and outputPoints[1])
 		outputPoints[0].x = xi1;	
 		outputPoints[0].y = yi1;
 		outputPoints[1].x = xi2;
@@ -242,42 +261,47 @@ Point * intersection(Circle c1, Circle c2){
 
 
 ServoAngles inverse(Point p, bool &outOfRange){
-	outOfRange = false;
-	ServoAngles servoAngles;
+	
+	ServoAngles servoAngles; // This will store the results of the calculation (theta1, theta2)
 	servoAngles.theta1 = 0;
 	servoAngles.theta2 = 0;
-	Circle cBaseL, cBaseR, cEnd;
+	
+	Circle cBaseL, cBaseR, cEnd; 
+	
+	// Right base circle: center is the right motor axis, radius is l1
 	cBaseR.x = dist/2;
 	cBaseR.y = 0;
 	cBaseR.r = l1;
 	
+	// Left base circle: center is the left motor axis, radius is l1
 	cBaseL.x = (-1)*dist/2;
 	cBaseL.y = 0;
 	cBaseL.r = l1;
 	
+	// End effector circle: center is the end effector position (p.x, p.y), radius is l2
 	cEnd.x = p.x;
 	cEnd.y = p.y;
 	cEnd.r = l2;
 	
-	// find intersection left:
+	// find intersections between the left base circle and the end effector circle:
 	Point * intersect_pointsL;
-	intersect_pointsL = intersection(cBaseL, cEnd);
-	
-	// select intersection:
+	intersect_pointsL = intersection(cBaseL, cEnd, outOfRange); // this finds the two possible positions of the left "elbow"
+	// select the desired position out of the two possibilities:
 	Point LeftArm;
-	if(intersect_pointsL[0].x < intersect_pointsL[1].x){
+	if(intersect_pointsL[0].x < intersect_pointsL[1].x){ 
 		LeftArm = intersect_pointsL[0];
 	}
 	else{
 		LeftArm = intersect_pointsL[1];	
 	}
-	// cout<< "LeftIntersect: "<<LeftArm.x<<", "<<LeftArm.y<<endl;
 	
-	// find intersection right:
+	
+	// find intersections between the right base circle and the end effector circle:
 	Point * intersect_pointsR;
-	intersect_pointsR = intersection(cBaseR, cEnd);
+	intersect_pointsR = intersection(cBaseR, cEnd, outOfRange); // this finds the two possible positions of the right "elbow"
 	
-	//select intersection
+	
+	// select the desired position out of the two possibilities:
 	Point RightArm;
 	if(intersect_pointsR[0].x > intersect_pointsR[1].x){
 		RightArm = intersect_pointsR[0];
@@ -285,20 +309,24 @@ ServoAngles inverse(Point p, bool &outOfRange){
 	else{
 		RightArm = intersect_pointsR[1];
 	}
-	// cout<< "RightIntersect: "<<RightArm.x<<", "<<RightArm.y<<endl;
 	
-	if(RightArm.y == -1||LeftArm.y==-1){
-		outOfRange = true;
+	// The intersection function sets outOfRange to true if the two circles do not touch
+	if(outOfRange == true){ // we selected a point that is out of the work area
 		// Set the angles to a safe value
 		servoAngles.theta1 = 90; 
 		servoAngles.theta2 = 90;
 	}
-	else{
-	servoAngles.theta1 = -(180/M_PI)*atan2(LeftArm.x+dist/2, LeftArm.y); // - M_PI/2;  
-	servoAngles.theta2 = (180/M_PI)*atan2(RightArm.x-dist/2 , RightArm.y); //M_PI/2 - 
+	else{ // The position is in the work area, so we calcualte the theta angles with atan2(x_elbow,y_elbow)
+	
+	// we ahve two sides of a triangle, we find the angle between the two sides:
+	servoAngles.theta1 = -(180/M_PI)*atan2(LeftArm.x+dist/2, LeftArm.y); 
+	// we ahve two sides of a triangle, we find the angle between the two sides:
+	servoAngles.theta2 = (180/M_PI)*atan2(RightArm.x-dist/2 , RightArm.y); 
 	
 	}	
+	// Free dinamically allocated memory
 	free(intersect_pointsL);
 	free(intersect_pointsR);
+	
 	return servoAngles;
 }

@@ -75,8 +75,8 @@ class Actuators{
 		Adafruit_StepperMotor*  motorR;
 		int magnetPin;		
 		bool outOfReach;
-		int angleR = 0;
-		int angleL = 0;
+		float angleR = 0;
+		float angleL = 0;
 		
 };
 
@@ -109,16 +109,13 @@ void setup() {
 	
 	// Debugging: 
 	
-	Serial.println("Stepping Left motor now:");
 	motL->setSpeed(10);  // 10 rpm   
 	
 	actuators.moveJ(70, 100);
-	actuators.moveJ(100, 70);
-	
 	actuators.moveJ(-70, -100);
+	actuators.moveJ(100, 70);
 	actuators.moveJ(-100, -70);
 	
-	Serial.println("Setup complete");
 	Point p;
 	p.x = 100; p.y = 300;
 	MotorAngles angls = actuators.inverse(p, outOfRange);
@@ -134,7 +131,6 @@ void loop() {
   if(commandQ.isEmpty())
   {
     Serial.println("Command queue empty, waiting for command...");
-	//actuators.moveJ(90, 10);
     delay(1000);
   }
   else{
@@ -249,24 +245,22 @@ bool Actuators::moveTrapez(float thetaL , float thetaR){
 	
 }
 
-bool Actuators::moveJ(float thetaL, float thetaR){ // Quasi-simultaneous operation of the two motors (Both motors stop at the same time)
+bool Actuators::moveJ(float stepsL, float stepsR){ // Quasi-simultaneous operation of the two motors (Both motors stop at the same time)
 	int directionL = 1;
 	int directionR = 1;
-	if(thetaL < 0){
+	int dirL = 1;
+	int dirR = 1;
+	if(stepsL < 0){
 		directionL = 0; // BACKWARD
+		dirL = -1;
 	}
-	if(thetaR < 0){
+	if(stepsR < 0){
 		directionR = 0; // BACKWARD
+		dirR = -1;
 	} 
-	thetaL = abs(thetaL);
-	thetaR = abs(thetaR);
-	Serial.print("thetaL: ");
-	Serial.println(thetaL);
-	float stepsRev = STEPS_REVOLUTION;
-	float angleStep = stepsRev / 360;
+	stepsL = abs(stepsL);
+	stepsR = abs(stepsR);
 	
-	float stepsL = round(angleStep * thetaL);
-	float stepsR = round(angleStep * thetaR);
 	int leftStepsTaken = 0;
 	int rightStepsTaken = 0;
 	float stepRatio = 0.0;
@@ -288,31 +282,67 @@ bool Actuators::moveJ(float thetaL, float thetaR){ // Quasi-simultaneous operati
 	Serial.print(stepsL); Serial.println(" steps.");
 	Serial.println("Stepping right motor with ");
 	Serial.print(stepsR); Serial.println(" steps.");
+	
+	// Trapez profil paramteters: 
+	
+	int maxSpeed = 500; // RPM
+	int startSpeed = 1;
+	int t1R = int( round( stepsR / 3 ));
+	int t1L = int( round( stepsL / 3 ));
+	int speedR = 0;
+	int speedL = 0;
+	int speedIncrL = int(round((maxSpeed-startSpeed)/t1L));
+	int speedIncrR = int(round((maxSpeed-startSpeed)/t1R));
+	
 	for(int i = 0; i < int(round(minSteps)); i++){
 		
 		steps2TakeR += stepRatioR;
 		int integerStepR = int(round(steps2TakeR));
-		Serial.print("Right motor stepping:  ");
-		Serial.print(integerStepR); Serial.println(" steps.");
 		
-		motorR->step(integerStepR,directionR,SINGLE);
+		for(int j=0; j<integerStepR; j++){
+			if(rightStepsTaken < t1R && speedR <= maxSpeed ){
+				speedR+=speedIncrR;
+				motorR->setSpeed(speedR);
+			
+			}
+			else if(rightStepsTaken > stepsR-t1R){
+				speedR -= speedIncrR;
+				motorR->setSpeed(speedR);
+			}
+			motorR->step(1,directionR,SINGLE);
+			rightStepsTaken++;
+		}
+		//motorR->step(integerStepR,directionR,SINGLE);
 		
-		angleR +=integerStepR;
-		rightStepsTaken += integerStepR;
+		angleR +=integerStepR*1.8*dirR;
+		Serial.print("Current angle R: "); Serial.println(angleR);
+		
 		steps2TakeR -= integerStepR;
 		
 		
 		steps2Take += stepRatio;
-		int integerStep = int(round(steps2Take));
-		Serial.print("Left motor stepping:  ");
-		Serial.print(integerStep); Serial.println(" steps.");
+		int integerStepL = int(round(steps2Take));
+	
+		for(int j=0; j<integerStepL; j++){
+			if(leftStepsTaken < t1L && speedL <= maxSpeed ){
+				speedL+=speedIncrL;
+				motorL->setSpeed(speedL);
+			
+			}
+			else if(leftStepsTaken > stepsL-t1L){
+				speedL -= speedIncrL;
+				motorL->setSpeed(speedL);
+			}
+			
+			motorL->step(1,directionL,SINGLE);
+			leftStepsTaken++;
+		}
+		//motorL->step(integerStepL, directionL, SINGLE);
+		
+		angleL +=integerStepL*1.8*dirL;
+		Serial.print("Current angle L: "); Serial.println(angleL);
 		Serial.println("");
-		
-		motorL->step(integerStep, directionL, SINGLE);
-		
-		leftStepsTaken += integerStep;
-		angleL +=integerStep;
-		steps2Take -= integerStep;
+		steps2Take -= integerStepL;
 	
 	} // End for
 	Serial.print("Left motor stepped: "); Serial.print(leftStepsTaken); Serial.println(" steps.");

@@ -16,9 +16,9 @@ Delta robot arduino control code
 #define START_ANGLE_LEFT 0
 #define START_ANGLE_RIGHT 0
 #define PICK_HEIGHT 200
-const double  dist = 100; // distance between the two motors
-const double  l1 = 150;  // length of the base arms (between a motor and a forearm)
-const double  l2 = 300; // length of the forearms (that connect with the endeffector)
+const double  dist = 50; // distance between the two motors
+const double  l1 = 70;  // length of the base arms (between a motor and a forearm)
+const double  l2 = 140; // length of the forearms (that connect with the endeffector)
 
 // ..other:
 
@@ -79,6 +79,8 @@ class Actuators{
 		bool outOfReach;
 		float angleR = 0;
 		float angleL = 0;
+		float stepsRev = STEPS_REVOLUTION;
+		float angFactor = 360 / stepsRev;
 		
 };
 
@@ -113,8 +115,11 @@ void setup() {
 	
 	// Calibration:
 	actuators.calibration();
-	
+	// actuators.move(100,200);
 	// Debugging: 
+	
+	/*
+	//debug motion: 
 	motL->setSpeed(150);
 	motR->setSpeed(150);
 	motL->step(200, FORWARD, SINGLE) ;
@@ -143,13 +148,14 @@ void setup() {
 	
 	actuators.moveJ(-50,-150);
 	actuators.moveJ(-150,-50);
-	Point p;
+	*/
+	/* Point p;
 	p.x = 100; p.y = 300;
 	MotorAngles angls = actuators.inverse(p, outOfRange);
 	Serial.println("angles: ");
 	Serial.println(angls.theta1);
 	Serial.print( " ");
-	Serial.println( angls.theta2);
+	Serial.println( angls.theta2); */
 
 } // __End setup__
 
@@ -157,7 +163,7 @@ void loop() {
 
   if(commandQ.isEmpty())
   {
-    Serial.println("Command queue empty, waiting for command...");
+    // Serial.println("Command queue empty, waiting for command...");
     delay(1000);
   }
   else{
@@ -191,9 +197,9 @@ bool Actuators::pickAndP(int xCoord, int color){
 bool Actuators::move(float thetaL, float thetaR){
 	float diffL = thetaL-angleL;
 	float diffR = thetaR-angleR;
-	
-	float stepsL = diffL / (360 / STEPS_REVOLUTION);
-	float stepsR = diffR / (360 / STEPS_REVOLUTION);
+	float stepsRev = STEPS_REVOLUTION;
+	float stepsL = diffL / (360 / stepsRev);
+	float stepsR = diffR / (360 / stepsRev);
 	
 	moveJ(stepsL, stepsR);
 	
@@ -206,7 +212,8 @@ bool Actuators::inverseK(int xCoord, int yCoord){
 	p.x = xCoord;
 	p.y = yCoord;
 	angles = inverse(p, outOfRange);
-	
+	Serial.print("theta1: ");Serial.println(angles.theta1);
+	Serial.print("theta2: ");Serial.println(angles.theta2);
 	if(outOfRange == false){
 		move(angles.theta1, angles.theta2);
 	}
@@ -239,6 +246,8 @@ bool Actuators::taskMgr(Command c){
 
 
 void serialEvent() {
+//Command structure: Number;Number;Number\n	
+	
 /*
   SerialEvent occurs whenever a new data comes in the hardware serial RX. This
   routine is run between each time loop() runs, so using delay inside loop can
@@ -291,7 +300,6 @@ Actuators::Actuators(Adafruit_StepperMotor *mL, Adafruit_StepperMotor *mR, int m
 	motorR = mR;
 	magnetPin = magnetP;
 }
-
 
 
 // TODO: correct inaccuracy by using half- and microstepping at the end of the movement
@@ -382,11 +390,40 @@ bool Actuators::moveJ(float stepsL, float stepsR){ // Quasi-simultaneous operati
 	Serial.print("Left motor stepped: "); Serial.print(leftStepsTaken); Serial.println("full steps.");
 	Serial.print("Right motor stepped: "); Serial.print(rightStepsTaken); Serial.println("full steps.");
 	
+	
+	angleL +=leftStepsTaken*dirL*angFactor;
+	angleR +=rightStepsTaken*dirR*angFactor;
+	
 	// microstep correction:
-	float stepErrorL = stepsL-leftStepsTaken;
-	float stepErrorR = stepsR-rightStepsTaken;
-	Serial.print("Left motor error: "); Serial.print(stepErrorL); Serial.println(" steps.");
-	Serial.print("Right motor error: "); Serial.print(stepErrorR); Serial.println(" steps.");
+	float stepErrorL = dirL*(stepsL-leftStepsTaken);
+	float stepErrorR = dirR*(stepsR-rightStepsTaken);
+	stepErrorL *=2;
+	stepErrorR *=2;
+	stepErrorL = round(stepErrorL);
+	stepErrorR = round(stepErrorR);
+	Serial.print("approx.  Left motor error: "); Serial.print(stepErrorL/2); Serial.println("steps.");
+	Serial.print("approx.  Right motor error: "); Serial.print(stepErrorR/2); Serial.println("steps.");
+	int dL = 1; 
+	int dR = 1;
+	if(stepErrorL!=0){
+		if (stepErrorL/abs(stepErrorL)<0){
+			dL = 0;
+		}
+	}
+	if(stepErrorR!=0){
+		if (stepErrorR/abs(stepErrorR)<0){
+			dR = 0;
+		}
+	}
+	int stepL = int(abs(stepErrorL));
+	int stepR = int(abs(stepErrorR));
+	
+	motorL->step(stepL, dL, MICROSTEP);
+	motorL->step(stepR, dR, MICROSTEP);
+	angleL +=stepErrorL*(angFactor/2);
+	angleR +=stepErrorR*(angFactor/2);
+	Serial.print("Theta L: "); Serial.println(angleL);
+	Serial.print("Theta R: "); Serial.println(angleR);
 	
 	return true;
 }
@@ -408,13 +445,10 @@ bool Actuators::setMagnet(bool status){
   return true;
 }
 
-
-
 bool Actuators::directK(int thetaL, int thetaR){
 
   return true;
 }
-
 
 Point * Actuators::intersection(Circle c1, Circle c2, bool & outOfRange){
 	outOfRange = false;
@@ -433,6 +467,7 @@ Point * Actuators::intersection(Circle c1, Circle c2, bool & outOfRange){
 		outputPoints[0].y = -1;
 		outputPoints[1].x = -1;
 		outputPoints[1].y = -1;
+		outOfRange = true;
 		return outputPoints;
 
 	// empty list of results
@@ -449,7 +484,6 @@ Point * Actuators::intersection(Circle c1, Circle c2, bool & outOfRange){
 	double  xi2 = xc - (h/d)*(y2-y1); // y coordinate of the second intersection point
 	double  yi2 = yc + (h/d)*(x2-x1); // y coordinate of the second intersection point
 
-	//TODO: get rid of this depracated if-else statement
 	if (yi1 > yi2){
 		// fills the outpoints[] array with the calculated intersections
 		// (we have two intersection points, outputpoints[0] and outputPoints[1])
@@ -464,14 +498,14 @@ Point * Actuators::intersection(Circle c1, Circle c2, bool & outOfRange){
 		outputPoints[0].x = xi2;
 		outputPoints[0].y = yi2;
 	}
-
+	// outputPoints [0] will have the greater y coordinate
 	return outputPoints;
 }
 
 MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	MotorAngles motorAngles; // This will store the results of the calculation (theta1, theta2)
-	motorAngles.theta1 = 0;
-	motorAngles.theta2 = 0;
+	motorAngles.theta1 = angleL;
+	motorAngles.theta2 = angleR;
 	
 	Circle cBaseL, cBaseR, cEnd; 
 	
@@ -520,8 +554,7 @@ MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	// The intersection function sets outOfRange to true if the two circles do not touch
 	if(outOfRange == true){ // we selected a point that is out of the work area
 		// Set the angles to a safe value
-		motorAngles.theta1 = 90; 
-		motorAngles.theta2 = 90;
+		Serial.println("out of Range!");
 	}
 	else{ // The position is in the work area, so we calcualte the theta angles with atan2(x_elbow,y_elbow)
 	

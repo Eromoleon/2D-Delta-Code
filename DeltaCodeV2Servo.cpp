@@ -1,6 +1,6 @@
 /*
 Delta robot arduino control code
-2018-05-01
+2018-03-19
 */
 
 #include <Arduino.h>
@@ -13,9 +13,12 @@ Delta robot arduino control code
 // Global constants::
 
 // ..geometry:
-
+#define SERVO_PIN_LEFT 9
+#define SERVO_PIN_RIGHT 10
 #define START_ANGLE_LEFT 90
 #define START_ANGLE_RIGHT 90
+#define SERVO_OFFSET 22 //servo coord system -> robot coord system
+
 #define PICK_HEIGHT 200
 const double  dist = 50; // distance between the two motors
 const double  l1 = 70;  // length of the base arms (between a motor and a forearm)
@@ -69,10 +72,7 @@ Servo servoL;
 Servo servoR;
 
 
-Circle clu(-82,-40,150);
-Circle cl0(-25,0,200);
-Circle cru(82,-40,150);
-Circle cr0(25,0,200);
+
 
 //bool isInSafetyRange(Point p);
 
@@ -89,6 +89,7 @@ class Actuators{
 		bool directK(int thetaL, int thetaR);
 		Point * intersection(Circle c1, Circle c2, bool & outOfRange);
 		MotorAngles inverse(Point p, bool &outOfRange);
+        bool isInSafetyRange(Point p);
 
 	private:
 	// TODO 4 points that constrain the work area
@@ -100,6 +101,10 @@ class Actuators{
 		float angleL = 0;
 		float thetaRev = STEPS_REVOLUTION;
 		float angFactor = 360 / thetaRev;
+        Circle clu = Circle(-82,-40,150);
+        Circle cl0 = Circle(-25,0,200);
+        Circle cru = Circle(82,-40,150);
+        Circle cr0 = Circle(25,0,200);
 
 };
 
@@ -119,7 +124,8 @@ String inputString = "";         // a String to hold incoming data
 
 void setup() {
 
-
+    servoL.attach(SERVO_PIN_LEFT);
+    servoR.attach(SERVO_PIN_RIGHT);
 	// initialize serial:
 	Serial.begin(115200);
 	// reserve 200 bytes for the inputString:
@@ -127,47 +133,14 @@ void setup() {
 
 
 	// Calibration:<
-	//actuators.calibration();
-	// Debugging:
-
-	/*
-	//debug motion:
-	motL->setSpeed(150);
-	motR->setSpeed(150);
-	motL->step(200, FORWARD, SINGLE) ;
-	motL->step(200, BACKWARD, SINGLE) ;
-
-	motR->step(200, FORWARD, SINGLE) ;
-	motR->step(200, BACKWARD, SINGLE) ;
-
+	actuators.calibration();
 	delay(2000);
-
-	actuators.moveJ(70, 100);
-	actuators.moveJ(-70, -100);
-	actuators.moveJ(100, 70);
-	actuators.moveJ(-100, -70);
-
-	actuators.moveJ(100, 70);
-	actuators.moveJ(-100, -70);
-	actuators.moveJ(70, 100);
-	actuators.moveJ(-70, -100);
-
-	actuators.moveJ(0, -100);
-	actuators.moveJ(-100, 0);
-
-	actuators.moveJ(200,0);
-	actuators.moveJ(0,200);
-
-	actuators.moveJ(-50,-150);
-	actuators.moveJ(-150,-50);
-	*/
-	/* Point p;
-	p.x = 100; p.y = 300;
-	MotorAngles angls = actuators.inverse(p, outOfRange);
-	Serial.println("angles: ");
-	Serial.println(angls.theta1);
-	Serial.print( " ");
-	Serial.println( angls.theta2); */
+    Serial.println("moving to 0,0:");
+    actuators.moveJ(-20,-20);
+    delay(2000);
+    Serial.println("moving to 90,90:");
+    actuators.moveJ(150,150);
+    delay(10000);
 
 } // __End setup__
 
@@ -191,64 +164,6 @@ void loop() {
 }
 // __End loop__
 
-
-bool Actuators::pickAndP(int xCoord, int color){
-	int yCoord = PICK_HEIGHT;
-
-	Serial.println("Normal operation, piece sorting");
-	Serial.print("Right Left Forward?: ");
-	Serial.println(color);
-	Serial.print("X: ");
-	Serial.println(xCoord);
-	Serial.println("Executing command...");
-	inverseK(xCoord, yCoord-10);
-	delay(2000);
-	Serial.println("\n");
-  return true;
-}
-
-bool Actuators::move(float thetaL, float thetaR){
-	moveJ(thetaL, thetaR);
-	return true;
-}
-
-bool Actuators::inverseK(int xCoord, int yCoord){
-	MotorAngles angles;
-	Point p;
-	p.x = xCoord;
-	p.y = yCoord;
-	angles = inverse(p, outOfRange);
-	Serial.print("theta1: ");Serial.println(angles.theta1);
-	Serial.print("theta2: ");Serial.println(angles.theta2);
-	if(outOfRange == false){
-		move(angles.theta1, angles.theta2);
-	}
-
-	return true;
-}
-
-bool Actuators::taskMgr(Command c){
-	 switch(c.determinant){
-		case 0:
-			pickAndP(c.data[1], c.data[2]);
-			break;
-		case 1:
-			inverseK(c.data[1], c.data[2]);
-			break;
-		case 2:
-			directK(c.data[1], c.data[2]);
-			break;
-		case 3:
-			calibration();
-			break;
-		default:
-			Serial.println("Undefined command type.");
-			break;
-    }
-    Serial.println("#########################################################");
-    return true;
-}
-
 void serialEvent() {
     //Command structure: Number;Number;Number\n
 
@@ -260,7 +175,7 @@ void serialEvent() {
 
     while (Serial.available()) {
         // get the new byte:
-        String inString = "";
+        //String inString = "";
 
         char inChar = (char)Serial.read();
         inputString += inChar;
@@ -298,24 +213,106 @@ void serialEvent() {
     } // Seruak,avaukabke
 }
 
+bool Actuators::pickAndP(int xCoord, int color){
+	int yCoord = PICK_HEIGHT;
+
+	Serial.println("Normal operation, piece sorting");
+	Serial.print("Right Left Forward?: ");
+	Serial.println(color);
+	Serial.print("X: ");
+	Serial.println(xCoord);
+	Serial.println("Executing command...");
+	inverseK(xCoord, yCoord-10);
+	delay(2000);
+	Serial.println("\n");
+  return true;
+}
+
+bool Actuators::move(float thetaL, float thetaR){
+    // Coordinate transformation:
+
+	moveJ(thetaL, thetaR);
+	return true;
+}
+
+bool Actuators::inverseK(int xCoord, int yCoord){
+	MotorAngles angles;
+	Point p;
+	p.x = xCoord;
+	p.y = yCoord;
+	angles = inverse(p, outOfRange);
+	Serial.print("theta1: ");Serial.println(angles.theta1);
+	Serial.print("theta2: ");Serial.println(angles.theta2);
+	if(outOfRange == false){
+		moveJ(angles.theta1, angles.theta2);
+        return true;
+	}
+    else return false;
+}
+
+bool Actuators::taskMgr(Command c){
+	 switch(c.determinant){
+		case 0:
+			pickAndP(c.data[1], c.data[2]);
+			break;
+		case 1:
+			inverseK(c.data[1], c.data[2]);
+			break;
+		case 2:
+			directK(c.data[1], c.data[2]);
+			break;
+		case 3:
+			calibration();
+			break;
+		default:
+			Serial.println("Undefined command type.");
+			break;
+    }
+    Serial.println("#########################################################");
+    return true;
+}
+
+
+
 Actuators::Actuators(Servo *servL, Servo *servR, int magnetP){
 	motorL = servL;
 	motorR = servR;
+    //motorL->attach(SERVO_PIN_LEFT);
+    //motorR->attach(SERVO_PIN_RIGHT);
 	magnetPin = magnetP;
 }
 
 
-// TODO: correct inaccuracy by using half- and microstepping at the end of the movement
-bool Actuators::moveJ(float thetaL, float thetaR){ // Quasi-simultaneous operation of the two motors (Both motors stop at the same time) with trapez profile
-	thetaL *= -1;
-	return true;
-}
+bool Actuators::moveJ(float thetaL, float thetaR){
+    int thetaMin = -SERVO_OFFSET;
+    int thetaMax = 180-SERVO_OFFSET;
 
+    if (thetaL>thetaMax || thetaL<thetaMin){
+        Serial.println("ThetaL cant be reached by the servo");
+        return false;
+    }
+    else if (thetaR>thetaMax || thetaR<thetaMin){
+        Serial.println("ThetaR cant be reached by the servo");
+        return false;
+    }
+    else{
+        float thetaSL = 180-SERVO_OFFSET-thetaL;
+        float thetaSR = SERVO_OFFSET+thetaR;
+
+        motorL->write(int(thetaSL));
+        motorR->write(int(thetaSR));
+        delay(1000);
+    	return true;
+
+    }
+
+}
 
 bool Actuators::calibration(){
 	Serial.println("Calibrating...");
 	angleL = START_ANGLE_LEFT;
 	angleR = START_ANGLE_RIGHT;
+    moveJ(angleL, angleR);
 	Serial.println("Calibration done!");
     return true;
 }
@@ -382,34 +379,30 @@ Point * Actuators::intersection(Circle c1, Circle c2, bool & outOfRange){
 	return outputPoints;
 }
 
+bool Actuators::isInSafetyRange(Point p2){
+    if(p2.x < 0){
+        return (!clu.isInside(p2) && cr0.isInside(p2));
+    }else{
+        return (!cru.isInside(p2) && cl0.isInside(p2));
+    }
+}
+
 MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	MotorAngles motorAngles; // This will store the results of the calculation (theta1, theta2)
+
 	motorAngles.theta1 = angleL;
 	motorAngles.theta2 = angleR;
 
-	Circle cBaseL((-1)*dist/2, 0, l1 );
-    Circle cBaseR(dist/2,0,l1);
+	Circle cBaseL((-1)*dist/2, 0, l1 ); // Left base circle: center is the left motor axis, radius is l1
+    Circle cBaseR(dist/2,0,l1); // Right base circle: center is the right motor axis, radius is l1
     Circle cEnd(p.x, p.y,l2);
 
-  // Left base circle: center is the left motor axis, radius is l1
-	//cBaseL.x = (-1)*dist/2;
-	//cBaseL.y = 0;
-	//cBaseL.r = l1;
 
-	// Right base circle: center is the right motor axis, radius is l1
-//	cBaseR.x = dist/2;
-//	cBaseR.y = 0;
-//	cBaseR.r = l1;
-
-
-
-	// End effector circle: center is the end effector position (p.x, p.y), radius is l2
-	//cEnd.x = p.x;
-	//cEnd.y = p.y;
-//	cEnd.r = l2;
-
-	// find intersections between the left base circle and the end effector circle:
+    if(!isInSafetyRange(p)){
+        outOfRange = true;
+    }
 	Point * intersect_pointsL;
+    // find intersections between the left base circle and the end effector circle:
 	intersect_pointsL = intersection(cBaseL, cEnd, outOfRange); // this finds the two possible positions of the left "elbow"
 	// select the desired position out of the two possibilities:
 	Point LeftArm;
@@ -424,8 +417,6 @@ MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	// find intersections between the right base circle and the end effector circle:
 	Point * intersect_pointsR;
 	intersect_pointsR = intersection(cBaseR, cEnd, outOfRange); // this finds the two possible positions of the right "elbow"
-
-
 	// select the desired position out of the two possibilities:
 	Point RightArm;
 	if(intersect_pointsR[0].x > intersect_pointsR[1].x){
@@ -434,7 +425,6 @@ MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	else{
 		RightArm = intersect_pointsR[1];
 	}
-
 	// The intersection function sets outOfRange to true if the two circles do not touch
 	if(outOfRange == true){ // we selected a point that is out of the work area
 		// Set the angles to a safe value
@@ -442,15 +432,14 @@ MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	}
 	else{ // The position is in the work area, so we calcualte the theta angles with atan2(x_elbow,y_elbow)
 
-	// we ahve two sides of a triangle, we find the angle between the two sides:
-	motorAngles.theta1 = -(180/M_PI)*atan2(LeftArm.x+dist/2, LeftArm.y);
-	// we ahve two sides of a triangle, we find the angle between the two sides:
-	motorAngles.theta2 = (180/M_PI)*atan2(RightArm.x-dist/2 , RightArm.y);
+	       // we ahve two sides of a triangle, we find the angle between the two sides:
+	   motorAngles.theta1 = -(180/M_PI)*atan2(LeftArm.x+dist/2, LeftArm.y);
+	      // we ahve two sides of a triangle, we find the angle between the two sides:
+	   motorAngles.theta2 = (180/M_PI)*atan2(RightArm.x-dist/2 , RightArm.y);
 
 	}
 	// Free dinamically allocated memory
 	free(intersect_pointsL);
 	free(intersect_pointsR);
-
 	return motorAngles;
 }

@@ -1,6 +1,6 @@
 /*
 Delta robot arduino control code
-2018-03-19
+2018-05-01
 */
 
 #include <Arduino.h>
@@ -57,7 +57,7 @@ Circle::Circle(double xC, double yC, double rV){
 }
 
 bool Circle::isInside(Point p){
-  return pow( p.x-x , 2 )+pow( p.y-y, 2 )<pow(r,2);
+  return pow( p.x-x , 2 ) + pow( p.y-y, 2 ) < pow(r,2);
 }
 
 struct MotorAngles{
@@ -67,6 +67,14 @@ struct MotorAngles{
 
 Servo servoL;
 Servo servoR;
+
+
+Circle clu(-82,-40,150);
+Circle cl0(-25,0,200);
+Circle cru(82,-40,150);
+Circle cr0(25,0,200);
+
+//bool isInSafetyRange(Point p);
 
 class Actuators{
 	public:
@@ -95,10 +103,8 @@ class Actuators{
 
 };
 
-
 // Functions:
 bool taskMgr(Command c);
-
 
 // Global variables:
 
@@ -221,7 +227,6 @@ bool Actuators::inverseK(int xCoord, int yCoord){
 	return true;
 }
 
-
 bool Actuators::taskMgr(Command c){
 	 switch(c.determinant){
 		case 0:
@@ -312,7 +317,7 @@ bool Actuators::calibration(){
 	angleL = START_ANGLE_LEFT;
 	angleR = START_ANGLE_RIGHT;
 	Serial.println("Calibration done!");
-  return true;
+    return true;
 }
 
 bool Actuators::setMagnet(bool status){
@@ -383,8 +388,8 @@ MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	motorAngles.theta2 = angleR;
 
 	Circle cBaseL((-1)*dist/2, 0, l1 );
-  Circle cBaseR(dist/2,0,l1);
-  Circle cEnd(p.x, p.y,l2);
+    Circle cBaseR(dist/2,0,l1);
+    Circle cEnd(p.x, p.y,l2);
 
   // Left base circle: center is the left motor axis, radius is l1
 	//cBaseL.x = (-1)*dist/2;
@@ -448,5 +453,4 @@ MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	free(intersect_pointsR);
 
 	return motorAngles;
-
 }

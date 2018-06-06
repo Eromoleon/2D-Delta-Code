@@ -12,16 +12,15 @@ Delta robot arduino control code
 // ##############################
 // Global constants::
 
-#define SERVO_PIN_LEFT 9
-#define SERVO_PIN_RIGHT 10
+
 
 // ..geometry:
 #define MAGNET_OFFSET 25
 #define START_ANGLE_LEFT 90
 #define START_ANGLE_RIGHT 90
 #define SERVO_OFFSET 22 //servo coord system -> robot coord system
-#define Y_MAX 160
-#define Y_MIN 110
+#define Y_MAX 145 // Intersection point maximum
+#define Y_MIN 50
 
 #define PICK_HEIGHT 150
 const double  dist = 50; // distance between the two motors
@@ -29,11 +28,12 @@ const double  l1 = 70;  // length of the base arms (between a motor and a forear
 const double  l2 = 140; // length of the forearms (that connect with the endeffector)
 
 // ..other:
-
+#define CONT_SERVO_PIN 3
+#define SERVO_PIN_LEFT 6
+#define SERVO_PIN_RIGHT 5
 #define MAGNET_PIN 1
 #define COMMAND_LENGTH 10
 #define FIFO_SIZE 20
-#define STEPS_REVOLUTION 200
 
 // ##############################
 // Typedefs:
@@ -64,7 +64,7 @@ Circle::Circle(double xC, double yC, double rV){
 }
 
 bool Circle::isInside(Point p){
-  return pow( p.x-x , 2 ) + pow( p.y-y, 2 ) < pow(r,2);
+  return ((pow( p.x-x , 2 ) + pow( p.y-y, 2 )) < pow(r,2));
 }
 
 struct MotorAngles{
@@ -78,18 +78,17 @@ Servo servoR;
 
 
 
-//bool isInSafetyRange(Point p);
+
 
 class Actuators{
 	public:
 		Actuators(Servo* servL, Servo* servR, int magnetP);
 		bool taskMgr(Command c);
-		bool move(float x, float y);
 		bool pickAndP(int xCoord = 0, int color = 0);
 		bool moveJ(float thetaL, float thetaR);
 		bool calibration();
 		bool setMagnet(bool status);
-		bool inverseK(int xCoord, int yCoord);
+		bool inverseK(float xCoord, float yCoord);
 		bool directK(int thetaL, int thetaR);
 		Point * intersection(Circle c1, Circle c2, bool & outOfRange);
 		MotorAngles inverse(Point p, bool &outOfRange);
@@ -103,10 +102,9 @@ class Actuators{
 		bool outOfReach;
 		float angleR = 0;
 		float angleL = 0;
-		float thetaRev = STEPS_REVOLUTION;
-		float angFactor = 360 / thetaRev;
         Circle clu = Circle(-82,-40,150);
         Circle cl0 = Circle(-25,0,200);
+
         Circle cru = Circle(82,-40,150);
         Circle cr0 = Circle(25,0,200);
 
@@ -171,7 +169,7 @@ void loop() {
     commandQ.pop(&c);
     //Serial.println("Command type: ");
     Serial.println(c.determinant);
-	//actuators.taskMgr(c);
+	actuators.taskMgr(c);
   }
 
     delay(10);
@@ -206,7 +204,7 @@ void serialEvent() {
                 char ch = (char)inputString[i];
                 long int number = 0;
 
-                if(ch!=';') {
+                if(ch!=';'&& ch!='\n') {
                 	numString+=ch ;
                 }
                 else {
@@ -242,14 +240,14 @@ bool Actuators::pickAndP(int xCoord, int color){
   return true;
 }
 
-bool Actuators::move(float thetaL, float thetaR){
-    // Coordinate transformation:
 
-	moveJ(thetaL, thetaR);
-	return true;
-}
+bool Actuators::inverseK(float xCoord, float yCoord){
+    Serial.print("x: ");
+    Serial.println(xCoord);
 
-bool Actuators::inverseK(int xCoord, int yCoord){
+    Serial.print("y: ");
+    Serial.println(yCoord);
+
     outOfRange = false;
 	MotorAngles angles;
 	Point p;
@@ -270,11 +268,12 @@ bool Actuators::taskMgr(Command c){
 		case 0:
 			pickAndP(c.data[1], c.data[2]);
 			break;
-		case 1:
-			inverseK(c.data[1], c.data[2]);
+
+        case 1:
+			directK(c.data[1], c.data[2]);
 			break;
 		case 2:
-			directK(c.data[1], c.data[2]);
+			inverseK(c.data[1], c.data[2]);
 			break;
 		case 3:
 			calibration();
@@ -393,11 +392,13 @@ Point * Actuators::intersection(Circle c1, Circle c2, bool & outOfRange){
 }
 
 bool Actuators::isInSafetyRange(Point p2){
+
     if (p2.y<Y_MAX && p2.y>Y_MIN){
         if(p2.x < 0){
-            return (!clu.isInside(p2) && cr0.isInside(p2));
-        }else{
-            return (!cru.isInside(p2) && cl0.isInside(p2));
+            return ((!clu.isInside(p2)) && cr0.isInside(p2));
+        }
+        else{
+            return ((!cru.isInside(p2)) && cl0.isInside(p2));
         }
     }
     else return false;
@@ -405,7 +406,9 @@ bool Actuators::isInSafetyRange(Point p2){
 
 MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	MotorAngles motorAngles; // This will store the results of the calculation (theta1, theta2)
-    p.y = p.y-MAGNET_OFFSET; // Offsetting the endeffector 30 mm from intersection point
+    p.y = p.y-MAGNET_OFFSET; // TCP -> Intersection point
+
+    // From here on we only calculate the intersection point NOT the TCP
 	motorAngles.theta1 = angleL;
 	motorAngles.theta2 = angleR;
 
@@ -416,7 +419,10 @@ MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 
     if(!isInSafetyRange(p)){
         outOfRange = true;
+        Serial.println("isInSafetyRange found position to be out of range.");
     }
+
+
 	Point * intersect_pointsL;
     // find intersections between the left base circle and the end effector circle:
 	intersect_pointsL = intersection(cBaseL, cEnd, outOfRange); // this finds the two possible positions of the left "elbow"

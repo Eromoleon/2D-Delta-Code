@@ -12,14 +12,18 @@ Delta robot arduino control code
 // ##############################
 // Global constants::
 
-// ..geometry:
 #define SERVO_PIN_LEFT 9
 #define SERVO_PIN_RIGHT 10
+
+// ..geometry:
+#define MAGNET_OFFSET 25
 #define START_ANGLE_LEFT 90
 #define START_ANGLE_RIGHT 90
 #define SERVO_OFFSET 22 //servo coord system -> robot coord system
+#define Y_MAX 160
+#define Y_MIN 110
 
-#define PICK_HEIGHT 200
+#define PICK_HEIGHT 150
 const double  dist = 50; // distance between the two motors
 const double  l1 = 70;  // length of the base arms (between a motor and a forearm)
 const double  l2 = 140; // length of the forearms (that connect with the endeffector)
@@ -132,15 +136,25 @@ void setup() {
 	inputString.reserve(200);
 
 
+    // DEBUG:
 	// Calibration:<
 	actuators.calibration();
-	delay(2000);
-    Serial.println("moving to 0,0:");
-    actuators.moveJ(-20,-20);
-    delay(2000);
-    Serial.println("moving to 90,90:");
-    actuators.moveJ(150,150);
-    delay(10000);
+    //actuators.inverseK(10,100);
+    //actuators.inverseK(-10,100);
+
+    //actuators.moveJ(-10,100);
+    //actuators.moveJ(0,90);
+    //actuators.moveJ(-10,90);
+    //actuators.inverseK(0, 130);
+    //actuators.inverseK(30, 130);
+    //actuators.inverseK(-30, 130);
+
+    //Serial.println("moving to 0,0:");
+    //actuators.moveJ(-20,-20);
+
+    //Serial.println("moving to 90,90:");
+    //actuators.moveJ(150,150);
+
 
 } // __End setup__
 
@@ -148,16 +162,16 @@ void loop() {
 
   if(commandQ.isEmpty())
   {
-    Serial.println("Command queue empty, waiting for command...");
-    delay(1000);
+    //Serial.println("Command queue empty, waiting for command...");
+    delay(50);
   }
   else{
 
     Command c;
     commandQ.pop(&c);
-    Serial.println("Command type: ");
+    //Serial.println("Command type: ");
     Serial.println(c.determinant);
-	actuators.taskMgr(c);
+	//actuators.taskMgr(c);
   }
 
     delay(10);
@@ -192,7 +206,7 @@ void serialEvent() {
                 char ch = (char)inputString[i];
                 long int number = 0;
 
-                if(isDigit(ch)) {
+                if(ch!=';') {
                 	numString+=ch ;
                 }
                 else {
@@ -206,25 +220,25 @@ void serialEvent() {
 
             c.determinant = c.data[0] ;
             commandQ.push(&c);
-            Serial.println("Message inserted into the Queue  \n");
+            //Serial.println("Message inserted into the Queue  \n");
             inputString = "";
 
             } // End if( ?"\n")
-    } // Seruak,avaukabke
+    }
 }
 
 bool Actuators::pickAndP(int xCoord, int color){
 	int yCoord = PICK_HEIGHT;
 
-	Serial.println("Normal operation, piece sorting");
-	Serial.print("Right Left Forward?: ");
-	Serial.println(color);
-	Serial.print("X: ");
-	Serial.println(xCoord);
-	Serial.println("Executing command...");
-	inverseK(xCoord, yCoord-10);
+	//Serial.println("Normal operation, piece sorting");
+	//Serial.print("Right Left Forward?: ");
+	//Serial.println(color);
+	//Serial.print("X: ");
+	//Serial.println(xCoord);
+	//Serial.println("Executing command...");
+	//inverseK(xCoord, yCoord-10);
 	delay(2000);
-	Serial.println("\n");
+	//Serial.println("\n");
   return true;
 }
 
@@ -236,6 +250,7 @@ bool Actuators::move(float thetaL, float thetaR){
 }
 
 bool Actuators::inverseK(int xCoord, int yCoord){
+    outOfRange = false;
 	MotorAngles angles;
 	Point p;
 	p.x = xCoord;
@@ -277,8 +292,6 @@ bool Actuators::taskMgr(Command c){
 Actuators::Actuators(Servo *servL, Servo *servR, int magnetP){
 	motorL = servL;
 	motorR = servR;
-    //motorL->attach(SERVO_PIN_LEFT);
-    //motorR->attach(SERVO_PIN_RIGHT);
 	magnetPin = magnetP;
 }
 
@@ -380,16 +393,19 @@ Point * Actuators::intersection(Circle c1, Circle c2, bool & outOfRange){
 }
 
 bool Actuators::isInSafetyRange(Point p2){
-    if(p2.x < 0){
-        return (!clu.isInside(p2) && cr0.isInside(p2));
-    }else{
-        return (!cru.isInside(p2) && cl0.isInside(p2));
+    if (p2.y<Y_MAX && p2.y>Y_MIN){
+        if(p2.x < 0){
+            return (!clu.isInside(p2) && cr0.isInside(p2));
+        }else{
+            return (!cru.isInside(p2) && cl0.isInside(p2));
+        }
     }
+    else return false;
 }
 
 MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	MotorAngles motorAngles; // This will store the results of the calculation (theta1, theta2)
-
+    p.y = p.y-MAGNET_OFFSET; // Offsetting the endeffector 30 mm from intersection point
 	motorAngles.theta1 = angleL;
 	motorAngles.theta2 = angleR;
 

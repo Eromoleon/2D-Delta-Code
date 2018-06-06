@@ -12,10 +12,17 @@ import subprocess
 from io import StringIO
 import csv
 
-
-
 time.sleep(2)
+
+# Set up Serial communication with arduino:
+BAUDRATE = 115200
+ser = serial.Serial('/dev/ttyACM0', BAUDRATE) # Establish the connection on a specific port
+ser.timeout = 10
+
+# import the camera:
 Camera = import_module('camera_' + 'pi').Camera
+
+# Initialize the queues used to communicate between the threads:
 # q = Queue.Queue()
 commandQ = Queue.Queue()
 PositionsQ = Queue.Queue()
@@ -64,8 +71,9 @@ class arduinoThread (threading.Thread):
 		print( "Command Manager Started")
 		while not self._stopevent.isSet( ):
 			if commandQ.empty():
-				print("Queue empty")
-				time.sleep(5)
+				pass
+				#print("Queue empty")
+				#time.sleep(5)
 				#self._stopevent.wait(self._sleepperiod)
 			else:
 				command = commandQ.get()
@@ -74,7 +82,7 @@ class arduinoThread (threading.Thread):
 					print('Command executed successfully')
 				else:
 					print('Command failed')
-				time.sleep(5)
+					#time.sleep(5)
 
 	def join(self):
 		""" Stop the thread and wait for it to end. """
@@ -86,13 +94,14 @@ class arduinoThread (threading.Thread):
 
 def commandManager(command):
 
-	determinant = command[0]
+	commandList = parseCommand(command)
+	determinant = commandList[0]
 	if determinant == 0:
 		normal()
 	elif determinant == 1:
-		directKin(command[1], command[2])
+		directKin(command)
 	elif determinant == 2:
-		inverseKin(command[1], command[2])
+		inverseKin(command)
 	else:
 		print("Command not recognised")
 	return True
@@ -101,13 +110,21 @@ def commandManager(command):
 def normal():
 	print('Normal operation')
 	return 0
-def directKin(thetaL, thetaR):
+def directKin(command):
 	print('Direct kinematics')
+	print( command)
 	print ('thetaL: ' , thetaL, '\nthetaR:',thetaR, '\n' )
 	return 0
-def inverseKin(x,y):
+def inverseKin(command):
 	print('Inverse kinematics')
-	return 0
+
+	print( command)
+	#ser.write(command.encode())
+	command = command+'\n'
+	com = '2;0;140\n'
+	encoded = command.encode('ascii')
+	ser.write(encoded)
+	return True
 
 
 arduThread = arduinoThread(1, "Thread-1", 1, commandQ)
@@ -154,11 +171,12 @@ def my_form():
 @app.route('/gui', methods=['POST'])
 def my_form_post():
 	command = request.form['text']
+	#print(command)
 
-	commandList = parseCommand(command)
+
 	#for number in commandList:
 	#	print(number)
-	commandQ.put(commandList)
+	commandQ.put(command)
 	return "Command received: %s" % (command)
 
 
@@ -170,11 +188,11 @@ def base():
 
 		print('Received command (CSV):')
 		print(command)
-		commandList= parseCommand(command)
 
 		#print('Numbers parsed from command CSV:')
 		#for number in commandList:
 		#	print (number)
+		commandQ.put(command)
 
 		return "Command received: %s" % (command)
 	else:
@@ -217,3 +235,4 @@ if __name__ == '__main__':
 
 	arduThread.join()
 	print("Arduino thread stopped")
+

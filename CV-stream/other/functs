@@ -1,0 +1,1 @@
+cv2.imencode('.jpg', img)[1].tobytes()

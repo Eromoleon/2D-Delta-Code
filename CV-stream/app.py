@@ -8,23 +8,45 @@ import time
 import threading
 import queue as Queue
 import serial
+import serial.tools.list_ports
 import subprocess
 from io import StringIO
 import csv
-
+import serial.tools.list_ports
 time.sleep(2)
+
+# Automatically find arduino based on hardware indentification if connected
+ports = list(serial.tools.list_ports.comports())
+arduPort = ''
+for p in ports:
+    if (' VID:PID=2341:0043'in p.hwid):
+        print("Found Arduino!")
+        print (p.hwid)
+        arduPort = '/dev/'+p.description
+
+if(arduPort == ''):
+	raise ValueError('No arduino connected. Please check your connection')
+else:
+	print("Arduino connected at: ", arduPort)
+
 
 # Set up Serial communication with arduino:
 BAUDRATE = 115200
-ser = serial.Serial('/dev/ttyACM0', BAUDRATE) # Establish the connection on a specific port
+#ser = serial.Serial('/dev/ttyACM0', BAUDRATE) # Establish the connection on a specific port
+ser = serial.Serial(arduPort, BAUDRATE) # Establish the connection on a specific port
 ser.timeout = 10
 
 # import the camera:
 Camera = import_module('camera_' + 'pi').Camera
 
 # Initialize the queues used to communicate between the threads:
-# q = Queue.Queue()
+# This queue buffers the command sent from the web. It is the interface
+# between the webserver and the command manager (arduino manager) thread.
 commandQ = Queue.Queue()
+
+# This queue buffers the image positions found by the image processing thread.
+# This is the interface between the image processing thread and
+# the command Manager (Arduino manager) thread.
 PositionsQ = Queue.Queue()
 
 
@@ -53,45 +75,41 @@ if eyeless == False:
 	camera = Camera(PositionsQ)
 else: camera = None
 
+# Initialize command manager thread:
 class arduinoThread (threading.Thread):
+    def __init__(self, threadID, name, counter, q):
+    	threading.Thread.__init__(self)
+    	self.threadID = threadID
+    	self.name = name
+    	self.counter = counter
+    	self._stopevent = threading.Event( )
+    def run(self):
+    	print ("Starting " + self.name)
+    	#print_time(self.name, self.counter, 5)
+    	## arduino management activity:
+    	print( "Command Manager Started")
+    	while not self._stopevent.isSet( ):
+            if commandQ.empty():
+                time.sleep(0.01)
+                pass
+            else:
+                time.sleep(0.01)
+                command = commandQ.get()
+                ret = commandManager(command)
+                if ret == True:
+                	print('Command executed successfully')
+                else:
+                	print('Command failed')
+                	#time.sleep(5)
 
-	def __init__(self, threadID, name, counter, q):
-		threading.Thread.__init__(self)
-		self.threadID = threadID
-		self.name = name
-		self.counter = counter
-		self._stopevent = threading.Event( )
+    def join(self):
+    	""" Stop the thread and wait for it to end. """
+    	timeout = 2
+    	self._stopevent.set( )
+    	threading.Thread.join(self, timeout)
+    	print ("Exiting " + self.name)
 
-	def run(self):
-		print ("Starting " + self.name)
-		#print_time(self.name, self.counter, 5)
-
-
-		## arduino management activity:
-		print( "Command Manager Started")
-		while not self._stopevent.isSet( ):
-			if commandQ.empty():
-				pass
-				#print("Queue empty")
-				#time.sleep(5)
-				#self._stopevent.wait(self._sleepperiod)
-			else:
-				command = commandQ.get()
-				ret = commandManager(command)
-				if ret == True:
-					print('Command executed successfully')
-				else:
-					print('Command failed')
-					#time.sleep(5)
-
-	def join(self):
-		""" Stop the thread and wait for it to end. """
-		timeout = 2
-		self._stopevent.set( )
-		threading.Thread.join(self, timeout)
-		print ("Exiting " + self.name)
-
-
+# Define command manager function: TODO: Rename task manager?
 def commandManager(command):
 
 	commandList = parseCommand(command)
@@ -106,29 +124,36 @@ def commandManager(command):
 		print("Command not recognised")
 	return True
 
-
 def normal():
 	print('Normal operation')
 	return 0
+
 def directKin(command):
 	print('Direct kinematics')
 	print( command)
-	print ('thetaL: ' , thetaL, '\nthetaR:',thetaR, '\n' )
-	return 0
+	command = command + '\n'
+	encoded = command.encode()
+	ret = ser.write(encoded)
+	print('Command sent to serial')
+	print(ret)
+	return True
+
 def inverseKin(command):
 	print('Inverse kinematics')
 
 	print( command)
-	#ser.write(command.encode())
+	#command = 'b'+command+'\n'
 	command = command+'\n'
-	com = '2;0;140\n'
-	encoded = command.encode('ascii')
-	ser.write(encoded)
+	#encoded = command.encode('ascii')
+	encoded = command.encode()
+	ret = ser.write(encoded)
+	print(ret)
+	print("Command sent to serial")
 	return True
-
 
 arduThread = arduinoThread(1, "Thread-1", 1, commandQ)
 
+ # Define web server:
 app = Flask(__name__)
 @app.route('/')
 def index():
@@ -210,9 +235,6 @@ def parseCommand(command):
     reader = csv.reader(f, delimiter=';')
     comList = list(reader)
     commandNumbers = list(map(float, comList[0]))
-    # debug:
-    #for number in commandNumbers:
-    #    print(number)
     return commandNumbers
 
 if __name__ == '__main__':
@@ -220,19 +242,16 @@ if __name__ == '__main__':
 
 	arduThread.start()
 	print(threading.activeCount())
-
 	if eyeless == False:
 		gen(camera)
-
 	print(threading.activeCount())
 	#time.sleep(2)
-	if disp == False:
+	  #if disp == False:
 		#if no display is connected use the remote UI:
-		app.run(host='0.0.0.0', threaded=True, debug=False)
-	else:
-		pass
+	app.run(host='0.0.0.0', threaded=True, debug=False)
+	#else:
+	#	pass
 
 
 	arduThread.join()
 	print("Arduino thread stopped")
-

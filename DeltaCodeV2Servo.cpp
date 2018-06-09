@@ -6,7 +6,6 @@ Delta robot arduino control code
 #include <Arduino.h>
 #include <cppQueue.h>
 #include <Wire.h>
-//#include <Adafruit_MotorShield.h>
 #include <Servo.h>
 
 // ##############################
@@ -15,25 +14,34 @@ Delta robot arduino control code
 
 
 // ..geometry:
-#define MAGNET_OFFSET 25
+#define TCP_OFFSET 25
 #define START_ANGLE_LEFT 90
 #define START_ANGLE_RIGHT 90
 #define SERVO_OFFSET 22 //servo coord system -> robot coord system
 #define Y_MAX 145 // Intersection point maximum
-#define Y_MIN 50
+#define Y_MIN 50 // not necessary
+#define X_BOUNDARY 130
 
+#define SAFE_MODE_Y_CONVEYOR 138
+#define SAFE_MODE_Y_WHEELS 150
+#define SAFE_MODE_X_WHEELS 45
 #define PICK_HEIGHT 150
 const double  dist = 50; // distance between the two motors
 const double  l1 = 70;  // length of the base arms (between a motor and a forearm)
 const double  l2 = 140; // length of the forearms (that connect with the endeffector)
 
-// ..other:
-#define CONT_SERVO_PIN 3
+// Pins:
+#define SERVO_PIN_CONT 3
 #define SERVO_PIN_LEFT 6
 #define SERVO_PIN_RIGHT 5
-#define MAGNET_PIN 1
+#define MAGNET_PIN 2
+#define IR_PIN 13
+
+// ..other:
 #define COMMAND_LENGTH 10
 #define FIFO_SIZE 20
+//TODO: otpimize:
+#define ANGLE_MOVEMENT_TIME 8 // How many milliseconds we estimate for one degree rotation
 
 // ##############################
 // Typedefs:
@@ -72,17 +80,14 @@ struct MotorAngles{
   double  theta2;
 };
 
+// Global declarations (Servo pointers):
 Servo servoL;
 Servo servoR;
-
-
-
-
-
+Servo servoC;
 
 class Actuators{
 	public:
-		Actuators(Servo* servL, Servo* servR, int magnetP);
+		Actuators(Servo* servL, Servo* servR, Servo* servC, int magnetP);
 		bool taskMgr(Command c);
 		bool pickAndP(int xCoord = 0, int color = 0);
 		bool moveJ(float thetaL, float thetaR);
@@ -90,6 +95,7 @@ class Actuators{
 		bool setMagnet(bool status);
 		bool inverseK(float xCoord, float yCoord);
 		bool directK(int thetaL, int thetaR);
+        Point directKin(float thL, float thR, bool &outOfRange);
 		Point * intersection(Circle c1, Circle c2, bool & outOfRange);
 		MotorAngles inverse(Point p, bool &outOfRange);
         bool isInSafetyRange(Point p);
@@ -98,6 +104,7 @@ class Actuators{
 	// TODO 4 points that constrain the work area
 		Servo*  motorL;
 		Servo*  motorR;
+        Servo*  motorC;
 		int magnetPin;
 		bool outOfReach;
 		float angleR = 0;
@@ -107,6 +114,10 @@ class Actuators{
 
         Circle cru = Circle(82,-40,150);
         Circle cr0 = Circle(25,0,200);
+        double currentX = 0;
+        double currentY = 0;
+        double currentThL = 0;
+        double currentThR = 0;
 
 };
 
@@ -118,7 +129,7 @@ bool taskMgr(Command c);
 Queue commandQ(sizeof(Command), FIFO_SIZE, FIFO);
 int magnetP = MAGNET_PIN;
 MotorAngles angles;
-Actuators actuators(&servoL, &servoR, magnetP);
+Actuators actuators(&servoL, &servoR, &servoC, magnetP);
 bool outOfRange = false;
 String inputString = "";         // a String to hold incoming data
 
@@ -126,32 +137,20 @@ String inputString = "";         // a String to hold incoming data
 
 void setup() {
 
+    pinMode(MAGNET_PIN, OUTPUT);
+    pinMode(IR_PIN, INPUT_PULLUP);
+
+    servoC.attach(SERVO_PIN_CONT);
     servoL.attach(SERVO_PIN_LEFT);
     servoR.attach(SERVO_PIN_RIGHT);
 	// initialize serial:
 	Serial.begin(115200);
 	// reserve 200 bytes for the inputString:
 	inputString.reserve(200);
-
-
+    actuators.calibration();
     // DEBUG:
 	// Calibration:<
-	actuators.calibration();
-    //actuators.inverseK(10,100);
-    //actuators.inverseK(-10,100);
 
-    //actuators.moveJ(-10,100);
-    //actuators.moveJ(0,90);
-    //actuators.moveJ(-10,90);
-    //actuators.inverseK(0, 130);
-    //actuators.inverseK(30, 130);
-    //actuators.inverseK(-30, 130);
-
-    //Serial.println("moving to 0,0:");
-    //actuators.moveJ(-20,-20);
-
-    //Serial.println("moving to 90,90:");
-    //actuators.moveJ(150,150);
 
 
 } // __End setup__
@@ -168,7 +167,7 @@ void loop() {
     Command c;
     commandQ.pop(&c);
     //Serial.println("Command type: ");
-    Serial.println(c.determinant);
+    //Serial.println(c.determinant);
 	actuators.taskMgr(c);
   }
 
@@ -242,11 +241,11 @@ bool Actuators::pickAndP(int xCoord, int color){
 
 
 bool Actuators::inverseK(float xCoord, float yCoord){
-    Serial.print("x: ");
-    Serial.println(xCoord);
+    //Serial.print("x: ");
+    //Serial.println(xCoord);
 
-    Serial.print("y: ");
-    Serial.println(yCoord);
+    //Serial.print("y: ");
+    //Serial.println(yCoord);
 
     outOfRange = false;
 	MotorAngles angles;
@@ -254,8 +253,8 @@ bool Actuators::inverseK(float xCoord, float yCoord){
 	p.x = xCoord;
 	p.y = yCoord;
 	angles = inverse(p, outOfRange);
-	Serial.print("theta1: ");Serial.println(angles.theta1);
-	Serial.print("theta2: ");Serial.println(angles.theta2);
+	//Serial.print("theta1: ");Serial.println(angles.theta1);
+	//Serial.print("theta2: ");Serial.println(angles.theta2);
 	if(outOfRange == false){
 		moveJ(angles.theta1, angles.theta2);
         return true;
@@ -279,41 +278,133 @@ bool Actuators::taskMgr(Command c){
 			calibration();
 			break;
 		default:
-			Serial.println("Undefined command type.");
+			Serial.println("-2");
+
 			break;
     }
-    Serial.println("#########################################################");
+    if(c.data[3] == 1){
+        //Serial.println("magnet on");
+        setMagnet(true);
+    }
+    else{
+        //Serial.println("magnet off");
+        setMagnet(false);
+    }
+    //Serial.println("#########################################################");
     return true;
 }
 
 
 
-Actuators::Actuators(Servo *servL, Servo *servR, int magnetP){
+Actuators::Actuators(Servo *servL, Servo *servR, Servo *servC, int magnetP){
 	motorL = servL;
 	motorR = servR;
+    motorC = servC;
+    motorC->write(90); // Otherwise it would start moving
 	magnetPin = magnetP;
 }
 
 
+Point Actuators::directKin(float thL, float thR, bool & outOfRange){
+    outOfRange = false;
+    Point p;
+    double thLRad = (double)thL/180*M_PI;
+    double thRRad = (double)thR/180*M_PI;
+    double dhalf = (double)dist / 2;
+    double x1L = -l1 * sin(thLRad) - dhalf;
+    double y1L = l1 * cos(thLRad);
+    double x1R = l1 * sin(thRRad) + dhalf;
+    double y1R = l1 * cos(thRRad);
+
+
+    Circle cBaseL(x1L,y1L,l2);
+    Circle cBaseR(x1R,y1R,l2);
+
+    Point * intersect_points;
+    intersect_points = intersection(cBaseL, cBaseR,outOfRange);
+
+    if(intersect_points[0].y > intersect_points[1].y){
+        p.x = round(intersect_points[0].x);
+        p.y = round(intersect_points[0].y) + TCP_OFFSET;
+    }else{
+        p.x = round(intersect_points[1].x);
+        p.y = round(intersect_points[1].y) + TCP_OFFSET;
+    }
+    //Serial.println("Direct kinematics:");
+    //Serial.print("x: ");
+    //Serial.println(p.x);
+    //Serial.print("y: ");
+    //Serial.println(p.y);
+    free(intersect_points);
+    return p;
+
+
+}
+
 bool Actuators::moveJ(float thetaL, float thetaR){
+    bool outOfRange = false;
     int thetaMin = -SERVO_OFFSET;
     int thetaMax = 180-SERVO_OFFSET;
 
+
+    Point checkPoint = directKin(thetaL, thetaR,outOfRange);
+    checkPoint.y = checkPoint.y - TCP_OFFSET;
+    outOfRange = !isInSafetyRange(checkPoint);
+
     if (thetaL>thetaMax || thetaL<thetaMin){
-        Serial.println("ThetaL cant be reached by the servo");
-        return false;
+        //Serial.println("ThetaL cant be reached by the servo");
+        outOfRange = true;
     }
     else if (thetaR>thetaMax || thetaR<thetaMin){
-        Serial.println("ThetaR cant be reached by the servo");
+        //Serial.println("ThetaR cant be reached by the servo");
+        outOfRange = true;
+    }
+
+    if(outOfRange == true){
+        //Serial.println("Out of range!");
+        Serial.println("-1");
         return false;
     }
     else{
         float thetaSL = 180-SERVO_OFFSET-thetaL;
         float thetaSR = SERVO_OFFSET+thetaR;
-
+        float delta_thL = abs(currentThL-thetaSL); // for calculating delay for servoL
+        float delta_thR = abs(currentThR-thetaSR); // for calculating delay for servoR
+        // Safe mode:
+        bool safeMove = false;
+        safeMove = (checkPoint.y + TCP_OFFSET > SAFE_MODE_Y_CONVEYOR || currentY + TCP_OFFSET > SAFE_MODE_Y_CONVEYOR )&& (checkPoint.x)*currentX < 0;
+        if( safeMove == false){
+            if (checkPoint.y + TCP_OFFSET > SAFE_MODE_Y_WHEELS && (abs(checkPoint.x)>SAFE_MODE_X_WHEELS||abs(currentX)>SAFE_MODE_X_WHEELS)){
+                safeMove = true;
+            }
+        }
+        if( safeMove ){ // change of sign at a low position
+            if(checkPoint.x < currentX){
+                //Serial.println("Moving Left first");
+                motorL->write(int(thetaSL));
+                delay(ANGLE_MOVEMENT_TIME*delta_thL); // delay proportional with angles to move
+                motorR->write(int(thetaSR));
+                delay(ANGLE_MOVEMENT_TIME*delta_thR); // delay proportional with angles to move
+            }
+            else{
+                //Serial.println("Moving Right first");
+                motorR->write(int(thetaSR));
+                delay(ANGLE_MOVEMENT_TIME*delta_thR); // delay proportional with angles to move
+                motorL->write(int(thetaSL));
+                delay(ANGLE_MOVEMENT_TIME*delta_thL); // delay proportional with angles to move
+            }
+        }
+        else{
         motorL->write(int(thetaSL));
         motorR->write(int(thetaSR));
-        delay(1000);
+        float greaterDelta = max(delta_thL, delta_thR);
+        delay(greaterDelta*ANGLE_MOVEMENT_TIME);
+        }
+        currentX = checkPoint.x;
+        currentY = checkPoint.y;
+        currentThL = thetaSL;
+        currentThR = thetaSR;
+        Serial.println("1");
     	return true;
 
     }
@@ -321,22 +412,26 @@ bool Actuators::moveJ(float thetaL, float thetaR){
 }
 
 bool Actuators::calibration(){
-	Serial.println("Calibrating...");
+	//Serial.println("Calibrating...");
 	angleL = START_ANGLE_LEFT;
 	angleR = START_ANGLE_RIGHT;
     moveJ(angleL, angleR);
-	Serial.println("Calibration done!");
+    delay(1000); // make sure it gets to start position from any start position.
+	//Serial.println("Calibration done!");
     return true;
 }
 
 bool Actuators::setMagnet(bool status){
-
-  return true;
+    if(status == true){
+        digitalWrite(magnetPin, HIGH);
+    }
+    else digitalWrite(magnetPin, LOW);
+    return true;
 }
 
 bool Actuators::directK(int thetaL, int thetaR){
-
-  return true;
+    moveJ(thetaL, thetaR);
+    return true;
 }
 
 Point * Actuators::intersection(Circle c1, Circle c2, bool & outOfRange){
@@ -393,7 +488,7 @@ Point * Actuators::intersection(Circle c1, Circle c2, bool & outOfRange){
 
 bool Actuators::isInSafetyRange(Point p2){
 
-    if (p2.y<Y_MAX && p2.y>Y_MIN){
+    if (p2.y<Y_MAX && p2.y>Y_MIN && abs(p2.x)<X_BOUNDARY){
         if(p2.x < 0){
             return ((!clu.isInside(p2)) && cr0.isInside(p2));
         }
@@ -406,7 +501,7 @@ bool Actuators::isInSafetyRange(Point p2){
 
 MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	MotorAngles motorAngles; // This will store the results of the calculation (theta1, theta2)
-    p.y = p.y-MAGNET_OFFSET; // TCP -> Intersection point
+    p.y = p.y-TCP_OFFSET; // TCP -> Intersection point
 
     // From here on we only calculate the intersection point NOT the TCP
 	motorAngles.theta1 = angleL;
@@ -419,7 +514,7 @@ MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 
     if(!isInSafetyRange(p)){
         outOfRange = true;
-        Serial.println("isInSafetyRange found position to be out of range.");
+        //Serial.println("isInSafetyRange found position to be out of range.");
     }
 
 
@@ -450,7 +545,8 @@ MotorAngles Actuators::inverse(Point p, bool &outOfRange){
 	// The intersection function sets outOfRange to true if the two circles do not touch
 	if(outOfRange == true){ // we selected a point that is out of the work area
 		// Set the angles to a safe value
-		Serial.println("out of Range!");
+		//Serial.println("out of Range!");
+
 	}
 	else{ // The position is in the work area, so we calcualte the theta angles with atan2(x_elbow,y_elbow)
 

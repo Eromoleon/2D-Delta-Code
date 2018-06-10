@@ -7,6 +7,7 @@ import cv2
 import numpy as np
 import os
 import configparser
+import json
 config = configparser.ConfigParser()
 
 HSVLOW = None
@@ -19,6 +20,22 @@ lower_red = np.array([90,40,40])
 upper_red = np.array([160,255,255])
 lower_white = np.array([90,40,40])
 upper_white = np.array([160,255,255])
+
+config.read('config.ini')
+bL = config['blue']['HSVLOW']
+bH = config['blue']['HSVHIGH']
+rL = config['red']['HSVLOW']
+rH = config['red']['HSVHIGH']
+wL = config['white']['HSVLOW']
+wH = config['white']['HSVHIGH']
+
+lower_blue = np.array(json.loads(bL))
+upper_blue = np.array(json.loads(bH))
+lower_red = np.array(json.loads(rL))
+upper_red = np.array(json.loads(rH))
+lower_white = np.array(json.loads(wL))
+upper_white = np.array(json.loads(wH))
+
 # For creating trackbars:
 def nothing(x):
 	pass
@@ -39,7 +56,7 @@ sh='Saturation High'
 sl='Saturation Low'
 vh='Value High'
 vl='Value Low'
-switch = '0 : Blue \n1 : Red\n2: White'
+switch = '0 : NoChange \n1 : Blue\n2: Red\n3:White'
 #Begin Creating trackbars for each
 cv2.createTrackbar(hl, windowName,0,179,nothing)
 cv2.createTrackbar(hh, windowName,0,179,nothing)
@@ -47,7 +64,7 @@ cv2.createTrackbar(sl, windowName,0,255,nothing)
 cv2.createTrackbar(sh, windowName,0,255,nothing)
 cv2.createTrackbar(vl, windowName,0,255,nothing)
 cv2.createTrackbar(vh, windowName,0,255,nothing)
-cv2.createTrackbar(switch, windowName,0,2,nothing)
+cv2.createTrackbar(switch, windowName,0,3,nothing)
 
 def imgproc(mat):
 	hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
@@ -60,73 +77,70 @@ def imgproc(mat):
 
 
 if __name__ == '__main__':
-    if disp == True:
-        with PiCamera() as camera:
-            # let camera warm up
-            camera.resolution = (640,480)
-            #stream = io.BytesIO()
-            stream = PiRGBArray(camera, size=(640, 480))
-            print("Calibration script running")
-            for frame in camera.capture_continuous(stream, 'bgr',  use_video_port=True):
-                mat = frame.array
-                mat = mat[0:480, 140:470] # Crop image to see only the conveyor belt
-                hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
-                mask = np.zeros_like(hsv)
-                # reset stream for next frame
-                stream.seek(0)
-                stream.truncate()
-                key = None
-                key = cv2.waitKey(1) & 0xFF
-                # Save thresholds:
+	if disp == True:
+		with PiCamera() as camera:
+			time.sleep(2)
+			camera.exposure_compensation = -10
+			# let camera warm up
+			camera.resolution = (640,480)
+			#stream = io.BytesIO()
+			stream = PiRGBArray(camera, size=(640, 480))
+			print("Calibration script running")
+			for frame in camera.capture_continuous(stream, 'bgr',  use_video_port=True):
+				mat = frame.array
+				mat = mat[0:480, 140:470] # Crop image to see only the conveyor belt
+				hsv = cv2.cvtColor(mat, cv2.COLOR_BGR2HSV)
+				mask = np.zeros_like(hsv)
+				# reset stream for next frame
+				stream.seek(0)
+				stream.truncate()
+				key = None
+				key = cv2.waitKey(1) & 0xFF
+				# Save thresholds:
 
-                hul=cv2.getTrackbarPos(hl, windowName)
-                huh=cv2.getTrackbarPos(hh, windowName)
-                sal=cv2.getTrackbarPos(sl, windowName)
-                sah=cv2.getTrackbarPos(sh, windowName)
-                val=cv2.getTrackbarPos(vl, windowName)
-                vah=cv2.getTrackbarPos(vh, windowName)
-                s = cv2.getTrackbarPos(switch,windowName)
-                #make array for final values
-                HSVLOW=np.array([hul,sal,val])
-                HSVHIGH=np.array([huh,sah,vah])
-                # define range of blue color in HSV
+				hul=cv2.getTrackbarPos(hl, windowName)
+				huh=cv2.getTrackbarPos(hh, windowName)
+				sal=cv2.getTrackbarPos(sl, windowName)
+				sah=cv2.getTrackbarPos(sh, windowName)
+				val=cv2.getTrackbarPos(vl, windowName)
+				vah=cv2.getTrackbarPos(vh, windowName)
+				s = cv2.getTrackbarPos(switch,windowName)
+				#make array for final values
+				HSVLOW=np.array([hul,sal,val])
+				HSVHIGH=np.array([huh,sah,vah])
+				# define range of blue color in HSV
 
-                mask = cv2.inRange(hsv, HSVLOW, HSVHIGH)
-                if s ==0:
-                    upper_blue = HSVHIGH
-                    lower_blue = HSVLOW
-                elif s == 1:
-                    upper_red = HSVHIGH
-                    lower_red = HSVLOW
-                elif s == 2:
-                    upper_white = HSVHIGH
-                    lower_white = HSVLOW
+				mask = cv2.inRange(hsv, HSVLOW, HSVHIGH)
+				res = cv2.bitwise_and(mat,mat, mask= mask)
+				cv2.imshow(windowName,mask)
+				cv2.imshow("Processed image", res)
+				if key == ord("s"):
+					if s == 1:
+						upper_blue = HSVHIGH
+						lower_blue = HSVLOW
+					elif s == 2:
+					    upper_red = HSVHIGH
+					    lower_red = HSVLOW
+					elif s == 3:
+					    upper_white = HSVHIGH
+					    lower_white = HSVLOW
 
-                res = cv2.bitwise_and(mat,mat, mask= mask)
-                cv2.imshow(windowName,mask)
-                cv2.imshow("Processed image", res)
+					print("Saving thesholds to calibration file")
 
-                if key == ord("s"):
+					config['blue'] = {}
+					config['blue']['HSVLOW'] = np.array2string(lower_blue,  separator=',')
+					config['blue']['HSVHIGH'] = np.array2string(upper_blue,  separator=',')
+					config['red'] = {}
+					config['red']['HSVLOW'] = np.array2string(lower_red,  separator=',')
+					config['red']['HSVHIGH'] = np.array2string(upper_red,  separator=',')
+					config['white'] = {}
+					config['white']['HSVLOW'] = np.array2string(lower_white,  separator=',')
+					config['white']['HSVHIGH'] = np.array2string(upper_white,  separator=',')
 
-                    print("Saving thesholds to calibration file")
-
-                    config['blue'] = {}
-                    config['blue']['HSVLOW'] = np.array2string(lower_blue,  separator=',')
-                    config['blue']['HSVHIGH'] = np.array2string(upper_blue,  separator=',')
-                    config['red'] = {}
-                    config['red']['HSVLOW'] = np.array2string(lower_red,  separator=',')
-                    config['red']['HSVHIGH'] = np.array2string(upper_red,  separator=',')
-                    config['white'] = {}
-                    config['white']['HSVLOW'] = np.array2string(lower_white,  separator=',')
-                    config['white']['HSVHIGH'] = np.array2string(upper_white,  separator=',')
-
-                    with open('config.ini', 'w') as configfile:
-                        config.write(configfile)
-
-
-
-                if key == ord("q"):
-                    break
-            cv2.destroyAllWindows()
-    else:
-        raise ValueError("No display connected. Please connect using VNC or connect a monitor.")
+					with open('config.ini', 'w') as configfile:
+					    config.write(configfile)
+				if key == ord("q"):
+					break
+			cv2.destroyAllWindows()
+	else:
+	    raise ValueError("No display connected. Please connect using VNC or connect a monitor.")

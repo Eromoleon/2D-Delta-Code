@@ -17,7 +17,7 @@ Delta robot arduino control code
 #define TCP_OFFSET 25
 #define START_ANGLE_LEFT 90
 #define START_ANGLE_RIGHT 90
-#define SERVO_OFFSET 22 //servo coord system -> robot coord system
+#define SERVO_OFFSET 55
 #define Y_MAX 145 // Intersection point maximum
 #define Y_MIN 50 // not necessary
 #define X_BOUNDARY 130
@@ -25,7 +25,7 @@ Delta robot arduino control code
 #define SAFE_MODE_Y_CONVEYOR 138
 #define SAFE_MODE_Y_WHEELS 150
 #define SAFE_MODE_X_WHEELS 45
-#define PICK_HEIGHT 150
+#define PICK_HEIGHT 162
 const double  dist = 50; // distance between the two motors
 const double  l1 = 70;  // length of the base arms (between a motor and a forearm)
 const double  l2 = 140; // length of the forearms (that connect with the endeffector)
@@ -38,6 +38,8 @@ const double  l2 = 140; // length of the forearms (that connect with the endeffe
 #define IR_PIN 13
 
 // ..other:
+#define PICKUP_DELAY 5000
+#define CONVEYOR_SPEED 2
 #define COMMAND_LENGTH 10
 #define FIFO_SIZE 20
 //TODO: otpimize:
@@ -123,7 +125,7 @@ class Actuators{
 
 // Functions:
 bool taskMgr(Command c);
-
+void(* resetFunc) (void) = 0;//declare reset function at address 0
 // Global variables:
 
 Queue commandQ(sizeof(Command), FIFO_SIZE, FIFO);
@@ -136,7 +138,7 @@ String inputString = "";         // a String to hold incoming data
 
 
 void setup() {
-
+    Serial.begin(115200);
     pinMode(MAGNET_PIN, OUTPUT);
     pinMode(IR_PIN, INPUT_PULLUP);
 
@@ -144,7 +146,8 @@ void setup() {
     servoL.attach(SERVO_PIN_LEFT);
     servoR.attach(SERVO_PIN_RIGHT);
 	// initialize serial:
-	Serial.begin(115200);
+
+    // Serial.println("Entering setup");
 	// reserve 200 bytes for the inputString:
 	inputString.reserve(200);
     actuators.calibration();
@@ -226,16 +229,50 @@ void serialEvent() {
 
 bool Actuators::pickAndP(int xCoord, int color){
 	int yCoord = PICK_HEIGHT;
+    inverseK(xCoord, yCoord);
+    motorC->write(90-CONVEYOR_SPEED);
+    delay(100);
+    while(digitalRead(IR_PIN)==1){
+        delay(10);
+    }
+    while(digitalRead(IR_PIN) == 0){
+        delay(10);
+    }
+    Serial.println("Object detected!");
 
-	//Serial.println("Normal operation, piece sorting");
-	//Serial.print("Right Left Forward?: ");
-	//Serial.println(color);
-	//Serial.print("X: ");
-	//Serial.println(xCoord);
-	//Serial.println("Executing command...");
-	//inverseK(xCoord, yCoord-10);
-	delay(2000);
-	//Serial.println("\n");
+    setMagnet(true);
+    delay(PICKUP_DELAY);
+    motorC->write(90);
+    delay(200);
+    inverseK(xCoord, yCoord+4);
+    delay(500);
+    inverseK(xCoord, yCoord -30);
+    if (color == 0){
+        inverseK(-95,140);
+        delay(200);
+        inverseK(-95,155);
+        setMagnet(false);
+        inverseK(-95,140);
+        inverseK(-95,155);
+    }
+    else if(color == 1){
+        inverseK(95,140);
+        delay(200);
+        inverseK(95,155);
+        setMagnet(false);
+        inverseK(95,140);
+        inverseK(95,155);
+    }
+    else{
+        setMagnet(false);
+        motorC->write(90-20);
+        delay(1000);
+        motorC->write(90);
+        delay(100);
+    }
+    directK(90,90);
+    delay(500);
+	Serial.println("1");
   return true;
 }
 
@@ -277,6 +314,9 @@ bool Actuators::taskMgr(Command c){
 		case 3:
 			calibration();
 			break;
+        case 4:
+            resetFunc();
+            break;
 		default:
 			Serial.println("-2");
 
@@ -289,6 +329,16 @@ bool Actuators::taskMgr(Command c){
     else{
         //Serial.println("magnet off");
         setMagnet(false);
+    }
+    if(c.determinant!=0){
+        if(c.data[4] == 1){
+            // Forward
+            motorC->write(90-CONVEYOR_SPEED);
+        }
+        else if(c.data[4] == 0){
+            // OFF
+            motorC->write(90);
+        }
     }
     //Serial.println("#########################################################");
     return true;

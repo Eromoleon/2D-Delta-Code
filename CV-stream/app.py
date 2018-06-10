@@ -320,3 +320,4 @@ if __name__ == '__main__':
     #if cameraOnly == False:
     arduThread.join()
     print("Arduino thread stopped")
+ 

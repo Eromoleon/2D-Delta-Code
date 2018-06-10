@@ -13,29 +13,33 @@ import subprocess
 from io import StringIO
 import csv
 import serial.tools.list_ports
+import numpy as np
 time.sleep(2)
-
+cameraOnly = True # Debugging the camera only and turn everything else off
 # Automatically find arduino based on hardware indentification if connected
 ports = list(serial.tools.list_ports.comports())
 arduPort = ''
 for p in ports:
     if (' VID:PID=2341:0043'in p.hwid):
-        print("Found Arduino!")
-        print (p.hwid)
+        print("Arduino detected with hardware id: ", p.hwid)
         arduPort = '/dev/'+p.description
-
+arduConnect = False
 if(arduPort == ''):
-	raise ValueError('No arduino connected. Please check your connection')
+	#raise ValueError('No arduino connected. Please check your device connections')
+    print("WARNING: No arduino connected. Please check your device connections")
 else:
-	print("Arduino connected at: ", arduPort)
+    print("Arduino connected at: ", arduPort)
+    arduConnect = True
 
 
 # Set up Serial communication with arduino:
 BAUDRATE = 115200
 #ser = serial.Serial('/dev/ttyACM0', BAUDRATE) # Establish the connection on a specific port
-ser = serial.Serial(arduPort, BAUDRATE) # Establish the connection on a specific port
-ser.timeout = 10
 
+if arduConnect == True:
+    ser = serial.Serial(arduPort, BAUDRATE) # Establish the connection on a specific port
+    ser.timeout = 10
+else: ser = None
 # import the camera:
 Camera = import_module('camera_' + 'pi').Camera
 
@@ -47,10 +51,7 @@ commandQ = Queue.Queue()
 # This queue buffers the image positions found by the image processing thread.
 # This is the interface between the image processing thread and
 # the command Manager (Arduino manager) thread.
-PositionsQ = Queue.Queue()
-
-
-
+positionsQ = Queue.Queue()
 # Check display connection:
 # True if a display (real or virtual like VNC) is connected.
 disp = False
@@ -72,7 +73,10 @@ else:
 	eyeless = False
 
 if eyeless == False:
-	camera = Camera(PositionsQ)
+    try:
+	       camera = Camera(positionsQ)
+    except:
+        raise IOError("Another application is already using the camera.")
 else: camera = None
 
 # Initialize command manager thread:
@@ -95,12 +99,13 @@ class arduinoThread (threading.Thread):
             else:
                 time.sleep(0.01)
                 command = commandQ.get()
-                ret = commandManager(command)
-                if ret == True:
-                	print('Command executed successfully')
-                else:
-                	print('Command failed')
-                	#time.sleep(5)
+                if arduConnect == True:
+                    ret = commandManager(command)
+                    if ret == True:
+                    	print('Command executed successfully')
+                    else:
+                    	print('Command failed')
+                    	#time.sleep(5)
 
     def join(self):
     	""" Stop the thread and wait for it to end. """
@@ -112,21 +117,69 @@ class arduinoThread (threading.Thread):
 # Define command manager function: TODO: Rename task manager?
 def commandManager(command):
 
-	commandList = parseCommand(command)
-	determinant = commandList[0]
-	if determinant == 0:
-		normal()
-	elif determinant == 1:
-		directKin(command)
-	elif determinant == 2:
-		inverseKin(command)
-	else:
-		print("Command not recognised")
-	return True
+    commandList = parseCommand(command)
+    determinant = commandList[0]
+    if determinant == 0:
+    	normal()
+    elif determinant == 1:
+    	directKin(command)
+    elif determinant == 2:
+        inverseKin(command)
+    elif determinant == 4 or determinant == 3:
+        command = command+'\n'
+        #encoded = command.encode('ascii')
+        encoded = command.encode()
+        ret = ser.write(encoded)
+        response = ser.readline()
+        if response == 1:
+            print("Movement executed successfully.")
+        if response == -1:
+            print("Position is out of range.")
+        print("Command sent to serial")
+    else:
+    	print("Command not recognised")
+    return True
 
 def normal():
-	print('Normal operation')
-	return 0
+    print('Normal operation')
+    with positionsQ.mutex:
+        positionsQ.queue.clear()
+    while(commandQ.empty()):
+        if(positionsQ.empty()):
+            time.sleep(2)
+        else:
+            # start the conveyor as soon as an object is detected
+            command = '1;90;90;0;1\n' # return to start position and start the conveyor
+            encoded = command.encode()
+            ret = ser.write(encoded)
+            response = ser.readline()
+            # get the image data and move robot acccordingly:
+            imData = positionsQ.get()
+            xPos = int(round( imData[0] ))
+            colorInt = 0
+            color = imData[1]
+            if color == 'blue':
+                colorInt = 0
+            elif color == 'red':
+                colorInt = 1
+            elif color == 'white':
+                colorInt = 2
+
+            print("Received position", xPos, "Color: ", color)
+
+            commandList = [0, xPos, colorInt ]
+            command = ';'.join(map(str, commandList))
+            command = command + '\n'
+            print(command)
+            encoded = command.encode()
+            ret = ser.write(encoded)
+            response = ser.readline()
+            if response == 1:
+                print("Movement executed successfully.")
+            if response == -1:
+                print("Error at normal operation.")
+
+    return 0
 
 def directKin(command):
 	print('Direct kinematics')
@@ -139,17 +192,21 @@ def directKin(command):
 	return True
 
 def inverseKin(command):
-	print('Inverse kinematics')
+    print('Inverse kinematics')
 
-	print( command)
-	#command = 'b'+command+'\n'
-	command = command+'\n'
-	#encoded = command.encode('ascii')
-	encoded = command.encode()
-	ret = ser.write(encoded)
-	print(ret)
-	print("Command sent to serial")
-	return True
+    print( command)
+    #command = 'b'+command+'\n'
+    command = command+'\n'
+    #encoded = command.encode('ascii')
+    encoded = command.encode()
+    ret = ser.write(encoded)
+    response = ser.readline()
+    if response == 1:
+        print("Movement executed successfully.")
+    if response == -1:
+        print("Position is out of range.")
+    print("Command sent to serial")
+    return True
 
 arduThread = arduinoThread(1, "Thread-1", 1, commandQ)
 
@@ -164,12 +221,12 @@ def index():
 		return render_template('index_noCam.html')
 
 def gen(camera):
-	"""Video streaming generator function."""
-	if eyeless == False:
-		while True:
-			frame = camera.get_frame()
-			yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
-
+    """Video streaming generator function."""
+    if eyeless == False:
+        camera.startNow()
+        while True:
+            frame = camera.get_frame()
+            yield (b'--frame\r\n' b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
 
 @app.route('/video_feed')
 def video_feed():
@@ -184,10 +241,17 @@ def video_feed():
 @app.route('/stop')
 def stoprequest():
 	print("Stop called")
-	arduThread.join()
+	#arduThread.join()
 	camera.stopNow()
 	return ("Stopping")
 
+@app.route('/start')
+def startrequest(): # doesn't work :()
+    print("start called")
+    #arduThread.join()
+    camera.startNow()
+    gen(camera)
+    return ("Starting")
 
 @app.route('/gui')
 def my_form():
@@ -239,19 +303,20 @@ def parseCommand(command):
 
 if __name__ == '__main__':
 
-
-	arduThread.start()
-	print(threading.activeCount())
-	if eyeless == False:
-		gen(camera)
-	print(threading.activeCount())
-	#time.sleep(2)
-	  #if disp == False:
-		#if no display is connected use the remote UI:
-	app.run(host='0.0.0.0', threaded=True, debug=False)
-	#else:
-	#	pass
-
-
-	arduThread.join()
-	print("Arduino thread stopped")
+    camera.startProcessing()
+    #if cameraOnly == False:
+    arduThread.start()
+    print(threading.activeCount())
+    if eyeless == False:
+    	gen(camera)
+    print(threading.activeCount())
+    #time.sleep(2)
+      #if disp == False:
+    	#if no display is connected use the remote UI:
+    #if cameraOnly == False:
+    app.run(host='0.0.0.0', threaded=True, debug=False)
+    #else:
+    #	pass
+    #if cameraOnly == False:
+    arduThread.join()
+    print("Arduino thread stopped")

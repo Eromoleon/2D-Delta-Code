@@ -17,8 +17,12 @@ import numpy as np
 time.sleep(2)
 cameraOnly = True # Debugging the camera only and turn everything else off
 # Automatically find arduino based on hardware indentification if connected
+
+arduPort = ''
+'''
 ports = list(serial.tools.list_ports.comports())
 arduPort = ''
+
 for p in ports:
     if (' VID:PID=2341:0043'in p.hwid):
         print("Arduino detected with hardware id: ", p.hwid)
@@ -30,16 +34,30 @@ if(arduPort == ''):
 else:
     print("Arduino connected at: ", arduPort)
     arduConnect = True
-
+'''
 
 # Set up Serial communication with arduino:
 BAUDRATE = 115200
-#ser = serial.Serial('/dev/ttyACM0', BAUDRATE) # Establish the connection on a specific port
-
-if arduConnect == True:
-    ser = serial.Serial(arduPort, BAUDRATE) # Establish the connection on a specific port
-    ser.timeout = 10
-else: ser = None
+ser = None
+while(arduPort == ''):
+    ports = list(serial.tools.list_ports.comports())
+    for p in ports:
+        if (' VID:PID=2341:0043'in p.hwid):
+            print("Arduino detected with hardware id: ", p.hwid)
+            arduPort = '/dev/'+p.description
+    arduConnect = False
+    if(arduPort == ''):
+        #raise ValueError('No arduino connected. Please check your device connections')
+        print("Arduino disconnected. Waiting to reconnect")
+        time.sleep(2)
+    else:
+        print("Arduino connected at: ", arduPort)
+        time.sleep(2)
+        arduConnect = True
+        ser = serial.Serial(arduPort, BAUDRATE) # Establish the connection on a specific port
+        ser.timeout = 10
+        ser = serial.Serial(arduPort, BAUDRATE) # Establish the connection on a specific port
+        ser.timeout = 10
 # import the camera:
 Camera = import_module('camera_' + 'pi').Camera
 
@@ -79,6 +97,67 @@ if eyeless == False:
         raise IOError("Another application is already using the camera.")
 else: camera = None
 
+
+def reconnectArduino():
+    global ser
+    time.sleep(0.5)
+    ser.close()
+    arduPort = ''
+    while(arduPort == ''):
+        ports = list(serial.tools.list_ports.comports())
+        for p in ports:
+            if (' VID:PID=2341:0043'in p.hwid):
+                print("Arduino detected with hardware id: ", p.hwid)
+                arduPort = '/dev/'+p.description
+        arduConnect = False
+        if(arduPort == ''):
+            #raise ValueError('No arduino connected. Please check your device connections')
+            print("Arduino disconnected. Waiting to reconnect")
+            time.sleep(2)
+        else:
+            print("Arduino connected at: ", arduPort)
+            time.sleep(2)
+            arduConnect = True
+            ser = serial.Serial(arduPort, BAUDRATE) # Establish the connection on a specific port
+            ser.timeout = 10
+
+def sendArduino(command):
+    global ser
+    command = command+'\n'
+    response = 0
+    encoded = command.encode()
+    try:
+        ret = ser.write(encoded)
+        response = ser.readline()
+
+    except (OSError, serial.SerialException):
+        print( "Serial communication failed." )
+        time.sleep(0.5)
+        ser.close()
+        arduPort = ''
+        while(arduPort == ''):
+            ports = list(serial.tools.list_ports.comports())
+            for p in ports:
+                if (' VID:PID=2341:0043'in p.hwid):
+                    print("Arduino detected with hardware id: ", p.hwid)
+                    arduPort = '/dev/'+p.description
+            arduConnect = False
+            if(arduPort == ''):
+            	#raise ValueError('No arduino connected. Please check your device connections')
+                print("Arduino disconnected. Waiting to reconnect")
+                time.sleep(2)
+            else:
+                print("Arduino connected at: ", arduPort)
+                time.sleep(2)
+                arduConnect = True
+                ser = serial.Serial(arduPort, BAUDRATE) # Establish the connection on a specific port
+                ser.timeout = 10
+    else:
+        print("Command sent to serial")
+
+    return response
+
+
 # Initialize command manager thread:
 class arduinoThread (threading.Thread):
     def __init__(self, threadID, name, counter, q):
@@ -88,11 +167,12 @@ class arduinoThread (threading.Thread):
     	self.counter = counter
     	self._stopevent = threading.Event( )
     def run(self):
-    	print ("Starting " + self.name)
-    	#print_time(self.name, self.counter, 5)
-    	## arduino management activity:
-    	print( "Command Manager Started")
-    	while not self._stopevent.isSet( ):
+        print ("Starting " + self.name)
+        #print_time(self.name, self.counter, 5)
+        ## arduino management activity:
+        print( "Command Manager Started")
+        received_data = ser.read(ser.inWaiting())
+        while not self._stopevent.isSet( ):
             if commandQ.empty():
                 time.sleep(0.01)
                 pass
@@ -125,16 +205,10 @@ def commandManager(command):
     	directKin(command)
     elif determinant == 2:
         inverseKin(command)
-    elif determinant == 4 or determinant == 3:
-        command = command+'\n'
-        #encoded = command.encode('ascii')
-        encoded = command.encode()
-        ret = ser.write(encoded)
-        response = ser.readline()
-        if response == 1:
-            print("Movement executed successfully.")
-        if response == -1:
-            print("Position is out of range.")
+    elif determinant == 3:
+        reconnectArduino()
+    elif determinant == 4:
+        response = sendArduino(command)
         print("Command sent to serial")
     else:
     	print("Command not recognised")
@@ -149,11 +223,8 @@ def normal():
             time.sleep(2)
         else:
             # start the conveyor as soon as an object is detected
-            command = '1;90;90;0;1\n' # return to start position and start the conveyor
-            encoded = command.encode()
-            ret = ser.write(encoded)
-            response = ser.readline()
-            # get the image data and move robot acccordingly:
+            command = "1;90;90;0;1" # return to start position and start the conveyor
+            sendArduino(command)
             imData = positionsQ.get()
             xPos = int(round( imData[0] ))
             colorInt = 0
@@ -169,11 +240,7 @@ def normal():
 
             commandList = [0, xPos, colorInt ]
             command = ';'.join(map(str, commandList))
-            command = command + '\n'
-            print(command)
-            encoded = command.encode()
-            ret = ser.write(encoded)
-            response = ser.readline()
+            response = sendArduino(command)
             if response == 1:
                 print("Movement executed successfully.")
             if response == -1:
@@ -184,11 +251,7 @@ def normal():
 def directKin(command):
 	print('Direct kinematics')
 	print( command)
-	command = command + '\n'
-	encoded = command.encode()
-	ret = ser.write(encoded)
-	print('Command sent to serial')
-	print(ret)
+	response = sendArduino(command)
 	return True
 
 def inverseKin(command):
@@ -196,16 +259,11 @@ def inverseKin(command):
 
     print( command)
     #command = 'b'+command+'\n'
-    command = command+'\n'
-    #encoded = command.encode('ascii')
-    encoded = command.encode()
-    ret = ser.write(encoded)
-    response = ser.readline()
+    response = sendArduino(command)
     if response == 1:
         print("Movement executed successfully.")
     if response == -1:
         print("Position is out of range.")
-    print("Command sent to serial")
     return True
 
 arduThread = arduinoThread(1, "Thread-1", 1, commandQ)
@@ -320,4 +378,3 @@ if __name__ == '__main__':
     #if cameraOnly == False:
     arduThread.join()
     print("Arduino thread stopped")
- 
